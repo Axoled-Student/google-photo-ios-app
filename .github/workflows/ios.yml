@@ -32,7 +32,7 @@ jobs:
       - name: Create booted simulator
         run: |
           set -euo pipefail
-          SIMULATOR_UDID="$(xcrun simctl list devices available -j | python3 -c "import json,sys; devices=json.load(sys.stdin)['devices']; candidates=[]; preferred=['iPhone 16 Pro','iPhone 16','iPhone 15 Pro','iPhone 15'];\nfor runtime_devices in devices.values():\n    for device in runtime_devices:\n        if device.get('isAvailable') and device.get('name', '').startswith('iPhone'):\n            candidates.append((device['name'], device['udid']))\nfor name in preferred:\n    for candidate_name, candidate_udid in candidates:\n        if candidate_name == name:\n            print(candidate_udid); raise SystemExit(0)\nif candidates:\n    print(candidates[0][1]); raise SystemExit(0)\nraise SystemExit('No available iPhone simulator found')")"
+          SIMULATOR_UDID="$(xcrun simctl list devices available -j | ruby -rjson -e "devices=JSON.parse(STDIN.read)['devices']; preferred=['iPhone 16 Pro','iPhone 16','iPhone 15 Pro','iPhone 15']; candidates=devices.values.flatten.select { |device| device['isAvailable'] && device['name'].start_with?('iPhone') }.map { |device| [device['name'], device['udid']] }; selected=preferred.lazy.filter_map { |name| candidates.find { |candidate| candidate[0] == name }&.last }.first || candidates.dig(0, 1); abort('No available iPhone simulator found') unless selected; puts selected")"
           xcrun simctl boot "$SIMULATOR_UDID" || true
           xcrun simctl bootstatus "$SIMULATOR_UDID" -b
           echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
