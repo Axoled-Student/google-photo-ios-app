@@ -23,6 +23,7 @@ targets:
     resources:
       - path: GooglePhotoSync/Resources/GoogleOAuthClient.plist
     info:
+      path: GooglePhotoSync/Resources/Info.plist
       properties:
         CFBundleDisplayName: Google Photo Sync
         GoogleOAuthClientID: $(GOOGLE_CLIENT_ID)
