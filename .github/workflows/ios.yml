@@ -37,6 +37,42 @@ jobs:
           xcrun simctl bootstatus "$SIMULATOR_UDID" -b
           echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
 
+      - name: Build for iOS Simulator
+        run: |
+          xcodebuild \
+            -project GooglePhotoSync.xcodeproj \
+            -scheme GooglePhotoSync \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath simulator-build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Run simulator launch smoke test
+        run: |
+          set -euo pipefail
+          APP_PATH="simulator-build/Build/Products/Debug-iphonesimulator/GooglePhotoSync.app"
+          xcrun simctl uninstall "$SIMULATOR_UDID" com.example.GooglePhotoSync || true
+          xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
+          xcrun simctl launch --terminate-running-process --console "$SIMULATOR_UDID" com.example.GooglePhotoSync > launch-console.log 2>&1 &
+          LAUNCH_PID=$!
+          sleep 15
+          if xcrun simctl terminate "$SIMULATOR_UDID" com.example.GooglePhotoSync; then
+            echo "Launch smoke test passed."
+          else
+            echo "Launch smoke test failed."
+            cat launch-console.log
+            exit 1
+          fi
+          wait "$LAUNCH_PID" || true
+
+      - name: Upload simulator launch log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GooglePhotoSync-simulator-launch-log
+          path: launch-console.log
+          if-no-files-found: warn
+
       - name: Run UI smoke tests
         run: |
           set -euo pipefail
@@ -56,15 +92,6 @@ jobs:
           name: GooglePhotoSync-test-results
           path: TestResults.xcresult
           if-no-files-found: warn
-
-      - name: Build for iOS Simulator
-        run: |
-          xcodebuild \
-            -project GooglePhotoSync.xcodeproj \
-            -scheme GooglePhotoSync \
-            -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO \
-            build
 
       - name: Build unsigned iPhoneOS app
         run: |
