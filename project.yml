@@ -17,14 +17,35 @@ targets:
     deploymentTarget: 17.0
     sources:
       - path: GooglePhotoSync
+        excludes:
+          - Resources/Info.plist
+          - Resources/GoogleOAuthClient.plist
+    resources:
+      - path: GooglePhotoSync/Resources/GoogleOAuthClient.plist
     info:
-      path: GooglePhotoSync/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Google Photo Sync
+        GoogleOAuthClientID: $(GOOGLE_CLIENT_ID)
+        GoogleOAuthRedirectURI: $(GOOGLE_REDIRECT_URI)
+        GoogleOAuthRedirectScheme: $(GOOGLE_REDIRECT_SCHEME)
+        GooglePhotosAlbumTitle: $(GOOGLE_PHOTOS_ALBUM_TITLE)
+        LSRequiresIPhoneOS: true
+        NSPhotoLibraryUsageDescription: Google Photo Sync needs access to your library to upload and sync your photos to Google Photos.
+        NSPhotoLibraryAddUsageDescription: Google Photo Sync needs access to your library to upload and sync your photos to Google Photos.
+        UIApplicationSupportsIndirectInputEvents: true
+        UIBackgroundModes:
+          - fetch
+          - processing
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        CFBundleURLTypes:
+          - CFBundleURLName: GoogleOAuth
+            CFBundleURLSchemes:
+              - $(GOOGLE_REDIRECT_SCHEME)
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.GooglePhotoSync
         PRODUCT_NAME: GooglePhotoSync
-        INFOPLIST_FILE: GooglePhotoSync/Resources/Info.plist
-        GENERATE_INFOPLIST_FILE: NO
         SWIFT_VERSION: 5.10
         CURRENT_PROJECT_VERSION: 1
         MARKETING_VERSION: 1.0
