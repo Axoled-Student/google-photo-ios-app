@@ -156,7 +156,8 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             descriptor: descriptor,
             fileURL: url,
             fileSize: Int64(fileSize),
-            mimeType: Self.mimeType(for: resource, kind: descriptor.kind)
+            mimeType: Self.mimeType(for: resource, kind: descriptor.kind),
+            contentFingerprint: try FileFingerprint.sha256Hex(for: url)
         )
     }
 

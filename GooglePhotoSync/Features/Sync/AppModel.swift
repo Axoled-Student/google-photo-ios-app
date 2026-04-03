@@ -283,6 +283,33 @@ final class AppModel {
                         try? FileManager.default.removeItem(at: prepared.fileURL)
                     }
 
+                    if let existingEntry = try await manifestStore.entry(
+                        matchingContentFingerprint: prepared.contentFingerprint,
+                        fileName: asset.fileName,
+                        fileSize: prepared.fileSize
+                    ) {
+                        try await manifestStore.linkDuplicateAsset(
+                            localIdentifier: asset.localIdentifier,
+                            fileName: asset.fileName,
+                            fileSize: prepared.fileSize,
+                            contentFingerprint: prepared.contentFingerprint,
+                            originalEntry: existingEntry
+                        )
+
+                        syncMetrics.completedItems = index + 1
+                        syncMetrics.estimatedTotalBytes = max(
+                            syncMetrics.uploadedBytes,
+                            syncMetrics.estimatedTotalBytes - prepared.fileSize
+                        )
+                        syncMetrics.currentFileName = asset.fileName
+                        syncMetrics.detailText = "Skipped duplicate \(index + 1) of \(assets.count)"
+                        syncMetrics.updatedAt = .now
+
+                        uploadedCount += 1
+                        pendingCount = max(assets.count - (index + 1), 0)
+                        continue
+                    }
+
                     syncMetrics.estimatedTotalBytes = max(
                         syncMetrics.uploadedBytes + prepared.fileSize,
                         syncMetrics.estimatedTotalBytes + (prepared.fileSize - asset.estimatedByteCount)
@@ -319,7 +346,8 @@ final class AppModel {
                         fileSize: prepared.fileSize,
                         mediaItemID: createdItem.id,
                         productURL: createdItem.productUrl.flatMap(URL.init(string:)),
-                        uploadedAt: .now
+                        uploadedAt: .now,
+                        contentFingerprint: prepared.contentFingerprint
                     )
 
                     try await manifestStore.markUploaded(entry)

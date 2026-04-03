@@ -61,6 +61,7 @@ struct PreparedAsset: Sendable {
     let fileURL: URL
     let fileSize: Int64
     let mimeType: String
+    let contentFingerprint: String
 }
 
 struct RecentUpload: Identifiable, Codable, Hashable, Sendable {
@@ -92,6 +93,7 @@ struct UploadManifestEntry: Codable, Hashable, Sendable {
     let mediaItemID: String
     let productURL: URL?
     let uploadedAt: Date
+    let contentFingerprint: String?
 }
 
 struct UploadManifest: Codable, Hashable, Sendable {

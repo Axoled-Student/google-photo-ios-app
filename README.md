@@ -10,7 +10,8 @@ feed.
 - A new SwiftUI iOS app scaffold generated with XcodeGen.
 - Google OAuth login via AppAuth.
 - Apple Photos permission and asset enumeration.
-- Incremental sync with a local manifest to avoid duplicate uploads.
+- Incremental sync with a local manifest plus persisted file fingerprints to
+  avoid duplicate uploads of the same photo/video.
 - A polished dashboard showing:
   - overall percentage
   - uploaded items out of total items

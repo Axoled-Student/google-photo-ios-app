@@ -36,6 +36,27 @@ actor UploadManifestStore {
         Set(try snapshot().entries.keys)
     }
 
+    func entry(
+        matchingContentFingerprint fingerprint: String,
+        fileName: String,
+        fileSize: Int64
+    ) throws -> UploadManifestEntry? {
+        let normalizedFileName = fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        return try snapshot().entries.values.first(where: {
+            if $0.contentFingerprint == fingerprint {
+                return true
+            }
+
+            guard $0.contentFingerprint == nil else {
+                return false
+            }
+
+            return $0.fileSize == fileSize &&
+                $0.fileName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == normalizedFileName
+        })
+    }
+
     func uploadedCount() throws -> Int {
         try snapshot().entries.count
     }
@@ -50,6 +71,26 @@ actor UploadManifestStore {
     func markUploaded(_ entry: UploadManifestEntry) throws {
         var manifest = try snapshot()
         manifest.entries[entry.localIdentifier] = entry
+        try persist(manifest)
+    }
+
+    func linkDuplicateAsset(
+        localIdentifier: String,
+        fileName: String,
+        fileSize: Int64,
+        contentFingerprint: String,
+        originalEntry: UploadManifestEntry
+    ) throws {
+        var manifest = try snapshot()
+        manifest.entries[localIdentifier] = UploadManifestEntry(
+            localIdentifier: localIdentifier,
+            fileName: fileName,
+            fileSize: fileSize,
+            mediaItemID: originalEntry.mediaItemID,
+            productURL: originalEntry.productURL,
+            uploadedAt: originalEntry.uploadedAt,
+            contentFingerprint: contentFingerprint
+        )
         try persist(manifest)
     }
 
