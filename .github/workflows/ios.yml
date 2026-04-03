@@ -53,6 +53,7 @@ jobs:
           APP_PATH="simulator-build/Build/Products/Debug-iphonesimulator/GooglePhotoSync.app"
           xcrun simctl uninstall "$SIMULATOR_UDID" com.example.GooglePhotoSync || true
           xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
+          sleep 5
           xcrun simctl spawn "$SIMULATOR_UDID" log stream --style compact --level debug --predicate 'process == "GooglePhotoSync" OR eventMessage CONTAINS[c] "GooglePhotoSync"' > simulator-log-stream.log 2>&1 &
           LOG_STREAM_PID=$!
           xcrun simctl launch --terminate-running-process --console "$SIMULATOR_UDID" com.example.GooglePhotoSync > launch-console.log 2>&1 &
