@@ -53,6 +53,8 @@ jobs:
           APP_PATH="simulator-build/Build/Products/Debug-iphonesimulator/GooglePhotoSync.app"
           xcrun simctl uninstall "$SIMULATOR_UDID" com.example.GooglePhotoSync || true
           xcrun simctl install "$SIMULATOR_UDID" "$APP_PATH"
+          xcrun simctl spawn "$SIMULATOR_UDID" log stream --style compact --level debug --predicate 'process == "GooglePhotoSync" OR eventMessage CONTAINS[c] "GooglePhotoSync"' > simulator-log-stream.log 2>&1 &
+          LOG_STREAM_PID=$!
           xcrun simctl launch --terminate-running-process --console "$SIMULATOR_UDID" com.example.GooglePhotoSync > launch-console.log 2>&1 &
           LAUNCH_PID=$!
           sleep 15
@@ -60,9 +62,15 @@ jobs:
             echo "Launch smoke test passed."
           else
             echo "Launch smoke test failed."
+            xcrun simctl spawn "$SIMULATOR_UDID" log show --style compact --last 5m --predicate 'process == "GooglePhotoSync" OR eventMessage CONTAINS[c] "GooglePhotoSync"' > simulator-log-show.log 2>&1 || true
             cat launch-console.log
+            cat simulator-log-show.log
+            kill "$LOG_STREAM_PID" || true
+            wait "$LOG_STREAM_PID" || true
             exit 1
           fi
+          kill "$LOG_STREAM_PID" || true
+          wait "$LOG_STREAM_PID" || true
           wait "$LAUNCH_PID" || true
 
       - name: Upload simulator launch log
@@ -70,7 +78,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: GooglePhotoSync-simulator-launch-log
-          path: launch-console.log
+          path: |
+            launch-console.log
+            simulator-log-stream.log
+            simulator-log-show.log
           if-no-files-found: warn
 
       - name: Run UI smoke tests
