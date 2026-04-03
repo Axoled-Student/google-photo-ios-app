@@ -249,6 +249,7 @@ final class AppModel {
             let assets = await Task.detached(priority: .userInitiated) {
                 PhotoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers)
             }.value
+            let photoLibraryService = ensurePhotoLibraryService()
 
             totalLibraryCount = librarySnapshot.totalLibraryCount
             uploadedCount = uploadedIdentifiers.count
