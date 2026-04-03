@@ -9,7 +9,7 @@ struct AppConfiguration: Sendable {
     static func load(bundle: Bundle = .main) -> AppConfiguration {
         let bundledClientConfiguration = BundledOAuthClientConfiguration.load(bundle: bundle)
 
-        AppConfiguration(
+        return AppConfiguration(
             clientID: bundle.infoDictionaryString(forKey: "GoogleOAuthClientID")
                 ?? bundledClientConfiguration?.clientID
                 ?? "",
