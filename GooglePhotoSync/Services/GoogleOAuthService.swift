@@ -63,7 +63,7 @@ final class GoogleOAuthService: NSObject {
 
         let presenter = try topViewController()
 
-        let state = try await withCheckedThrowingContinuation { continuation in
+        let state = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<OIDAuthState, Error>) in
             currentAuthorizationFlow = OIDAuthState.authState(
                 byPresenting: request,
                 presenting: presenter
@@ -104,7 +104,7 @@ final class GoogleOAuthService: NSObject {
             throw GoogleAuthError.missingAuthState
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
             authState.performAction { accessToken, _, error in
                 if let error {
                     continuation.resume(throwing: error)
@@ -166,7 +166,7 @@ final class GoogleOAuthService: NSObject {
     }
 
     private static func restoreAuthState(from keychain: KeychainStore, account: String) -> OIDAuthState? {
-        guard let data = try? keychain.load(account: account), let data else {
+        guard let data = try? keychain.load(account: account) else {
             return nil
         }
 
@@ -175,7 +175,7 @@ final class GoogleOAuthService: NSObject {
 
     private static func decodeProfile(from authState: OIDAuthState?) -> GoogleUserProfile? {
         let idToken = authState?.lastTokenResponse?.idToken
-            ?? authState?.lastAuthorizationResponse.additionalParameters?["id_token"]
+            ?? authState?.lastAuthorizationResponse.additionalParameters?["id_token"] as? String
 
         guard
             let idToken,
