@@ -8,6 +8,7 @@ final class GooglePhotoSyncUITests: XCTestCase {
     @MainActor
     func testAppLaunchesAndShowsDashboard() throws {
         let app = XCUIApplication()
+        app.launchEnvironment["UITEST_DISABLE_BOOTSTRAP"] = "1"
         app.launch()
 
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))

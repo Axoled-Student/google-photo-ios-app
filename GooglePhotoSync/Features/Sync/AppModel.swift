@@ -33,6 +33,7 @@ final class AppModel {
     private let photoLibraryService: PhotoLibraryService
     private let manifestStore = UploadManifestStore()
     private let googlePhotosAPI: GooglePhotosAPI
+    private let skipsBootstrapWork: Bool
     private var syncTask: Task<Void, Never>?
     private var pendingResync = false
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
@@ -41,6 +42,7 @@ final class AppModel {
         let configuration = AppConfiguration.load()
         let authService = GoogleOAuthService(configuration: configuration)
         let photoLibraryService = PhotoLibraryService()
+        let skipsBootstrapWork = ProcessInfo.processInfo.environment["UITEST_DISABLE_BOOTSTRAP"] == "1"
 
         self.configuration = configuration
         self.authService = authService
@@ -48,6 +50,7 @@ final class AppModel {
         self.googlePhotosAPI = GooglePhotosAPI { [authService] in
             try await authService.freshAccessToken()
         }
+        self.skipsBootstrapWork = skipsBootstrapWork
         self.userProfile = authService.profile
         self.photoAccessState = photoLibraryService.currentAuthorizationState()
         self.isSignedIn = authService.isSignedIn
@@ -101,6 +104,11 @@ final class AppModel {
         guard !isBootstrapped else { return }
         isBootstrapped = true
 
+        guard !skipsBootstrapWork else {
+            updateStatus()
+            return
+        }
+
         await refreshLocalState()
 
         if configuration.isConfigured, isSignedIn, photoAccessState.isGranted, pendingCount > 0 {
@@ -109,7 +117,7 @@ final class AppModel {
     }
 
     func handleScenePhaseChange(_ phase: ScenePhase) {
-        guard phase == .active, isBootstrapped else { return }
+        guard phase == .active, isBootstrapped, !skipsBootstrapWork else { return }
 
         Task { [weak self] in
             guard let self else { return }
@@ -446,7 +454,7 @@ final class AppModel {
     }
 
     private func handleLibraryChange() {
-        guard isBootstrapped else { return }
+        guard isBootstrapped, !skipsBootstrapWork else { return }
 
         Task { [weak self] in
             guard let self else { return }
