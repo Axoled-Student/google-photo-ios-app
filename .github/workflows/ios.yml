@@ -56,8 +56,7 @@ jobs:
           sleep 5
           xcrun simctl spawn "$SIMULATOR_UDID" log stream --style compact --level debug --predicate 'process == "GooglePhotoSync" OR eventMessage CONTAINS[c] "GooglePhotoSync"' > simulator-log-stream.log 2>&1 &
           LOG_STREAM_PID=$!
-          xcrun simctl launch --terminate-running-process --console "$SIMULATOR_UDID" com.example.GooglePhotoSync > launch-console.log 2>&1 &
-          LAUNCH_PID=$!
+          xcrun simctl launch --terminate-running-process "$SIMULATOR_UDID" com.example.GooglePhotoSync > launch-console.log 2>&1
           sleep 15
           if xcrun simctl terminate "$SIMULATOR_UDID" com.example.GooglePhotoSync; then
             echo "Launch smoke test passed."
@@ -72,7 +71,6 @@ jobs:
           fi
           kill "$LOG_STREAM_PID" || true
           wait "$LOG_STREAM_PID" || true
-          wait "$LAUNCH_PID" || true
 
       - name: Upload simulator launch log
         if: always()
