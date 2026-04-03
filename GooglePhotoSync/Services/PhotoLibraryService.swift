@@ -33,7 +33,6 @@ enum PhotoLibraryServiceError: LocalizedError {
     }
 }
 
-@MainActor
 final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     var onLibraryChange: (@MainActor () -> Void)?
 
@@ -83,6 +82,14 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func syncableAssetCount() -> Int {
+        Self.syncableAssetCount()
+    }
+
+    func fetchDescriptors(excluding uploadedIdentifiers: Set<String>) -> [LibraryAssetDescriptor] {
+        Self.fetchDescriptors(excluding: uploadedIdentifiers)
+    }
+
+    nonisolated static func syncableAssetCount() -> Int {
         let fetchResult = PHAsset.fetchAssets(with: PHFetchOptions())
         var count = 0
         fetchResult.enumerateObjects { asset, _, _ in
@@ -93,7 +100,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         return count
     }
 
-    func fetchDescriptors(excluding uploadedIdentifiers: Set<String>) -> [LibraryAssetDescriptor] {
+    nonisolated static func fetchDescriptors(excluding uploadedIdentifiers: Set<String>) -> [LibraryAssetDescriptor] {
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
 

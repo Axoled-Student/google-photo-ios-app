@@ -6,6 +6,11 @@ import UIKit
 @MainActor
 @Observable
 final class AppModel {
+    private struct LocalLibrarySnapshot: Sendable {
+        let totalLibraryCount: Int
+        let pendingCount: Int
+    }
+
     let configuration: AppConfiguration
 
     var userProfile: GoogleUserProfile?
@@ -237,9 +242,12 @@ final class AppModel {
 
         do {
             let uploadedIdentifiers = try await manifestStore.uploadedIdentifiers()
-            let assets = photoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers)
+            let librarySnapshot = await scanLibrary(excluding: uploadedIdentifiers)
+            let assets = await Task.detached(priority: .userInitiated) {
+                PhotoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers)
+            }.value
 
-            totalLibraryCount = photoLibraryService.syncableAssetCount()
+            totalLibraryCount = librarySnapshot.totalLibraryCount
             uploadedCount = uploadedIdentifiers.count
             pendingCount = assets.count
 
@@ -409,8 +417,9 @@ final class AppModel {
             }
             uploadedCount = try await manifestStore.uploadedCount()
             let uploadedIdentifiers = try await manifestStore.uploadedIdentifiers()
-            totalLibraryCount = photoLibraryService.syncableAssetCount()
-            pendingCount = photoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers).count
+            let librarySnapshot = await scanLibrary(excluding: uploadedIdentifiers)
+            totalLibraryCount = librarySnapshot.totalLibraryCount
+            pendingCount = librarySnapshot.pendingCount
             lastSyncDate = manifestEntries.first?.uploadedAt ?? lastSyncDate
             if syncMetrics.phase != .failed {
                 lastErrorMessage = nil
@@ -420,6 +429,20 @@ final class AppModel {
         }
 
         updateStatus()
+    }
+
+    private func scanLibrary(excluding uploadedIdentifiers: Set<String>) async -> LocalLibrarySnapshot {
+        guard photoAccessState.isGranted else {
+            return LocalLibrarySnapshot(totalLibraryCount: 0, pendingCount: 0)
+        }
+
+        return await Task.detached(priority: .userInitiated) {
+            let descriptors = PhotoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers)
+            return LocalLibrarySnapshot(
+                totalLibraryCount: PhotoLibraryService.syncableAssetCount(),
+                pendingCount: descriptors.count
+            )
+        }.value
     }
 
     private func handleLibraryChange() {
