@@ -22,18 +22,23 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            ZStack {
-                background
+            GeometryReader { proxy in
+                let compactLayout = proxy.size.width < 430
 
-                ScrollView {
-                    VStack(spacing: 18) {
-                        heroCard
-                        actionCard
-                        metricsCard
-                        uploadsCard
-                        noteCard
+                ZStack {
+                    background
+
+                    ScrollView {
+                        VStack(spacing: 18) {
+                            heroCard(compact: compactLayout)
+                            actionCard
+                            metricsCard(compact: compactLayout)
+                            uploadsCard
+                            noteCard
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(20)
                     }
-                    .padding(20)
                 }
             }
             .navigationTitle("Google Photo Sync")
@@ -77,30 +82,28 @@ struct DashboardView: View {
         }
     }
 
-    private var heroCard: some View {
+    @ViewBuilder
+    private func heroCard(compact: Bool) -> some View {
         CardShell {
-            HStack(alignment: .center, spacing: 18) {
-                ProgressRing(progress: model.syncMetrics.progressFraction)
-                    .frame(width: 122, height: 122)
+            if compact {
+                VStack(alignment: .leading, spacing: 16) {
+                    ProgressRing(progress: model.syncMetrics.progressFraction)
+                        .frame(width: 92, height: 92)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(model.statusTitle)
-                        .font(.system(size: 28, weight: .bold, design: .rounded))
-                        .foregroundStyle(Color(red: 0.12, green: 0.17, blue: 0.25))
+                    heroTextBlock(titleSize: 24)
+                    heroBadges
+                }
+            } else {
+                HStack(alignment: .center, spacing: 18) {
+                    ProgressRing(progress: model.syncMetrics.progressFraction)
+                        .frame(width: 122, height: 122)
 
-                    Text(model.statusDetail)
-                        .font(.system(.body, design: .rounded))
-                        .foregroundStyle(.secondary)
-
-                    HStack(spacing: 10) {
-                        Label(model.photoAccessState.isGranted ? "Photos Ready" : "Photos Locked", systemImage: model.photoAccessState.isGranted ? "checkmark.shield.fill" : "lock.fill")
-                            .modifier(PillStyle(fill: model.photoAccessState.isGranted ? Color.green.opacity(0.16) : Color.orange.opacity(0.16), foreground: model.photoAccessState.isGranted ? .green : .orange))
-
-                        if let email = model.userProfile?.email {
-                            Label(email, systemImage: "person.crop.circle.fill")
-                                .modifier(PillStyle(fill: Color.blue.opacity(0.12), foreground: Color.blue))
-                        }
+                    VStack(alignment: .leading, spacing: 10) {
+                        heroTextBlock(titleSize: 28)
+                        heroBadges
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .layoutPriority(1)
                 }
             }
         }
@@ -125,6 +128,8 @@ struct DashboardView: View {
                         Image(systemName: model.isSignedIn ? "arrow.triangle.2.circlepath.circle.fill" : "person.badge.key.fill")
                         Text(model.primaryActionTitle)
                             .font(.system(.headline, design: .rounded).weight(.semibold))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.85)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
@@ -136,44 +141,33 @@ struct DashboardView: View {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.system(.footnote, design: .rounded))
                         .foregroundStyle(Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
     }
 
-    private var metricsCard: some View {
+    @ViewBuilder
+    private func metricsCard(compact: Bool) -> some View {
         CardShell {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Sync Metrics")
                     .font(.system(.title3, design: .rounded).weight(.bold))
 
-                LazyVGrid(
-                    columns: [
-                        GridItem(.flexible(), spacing: 12),
-                        GridItem(.flexible(), spacing: 12)
-                    ],
-                    spacing: 12
-                ) {
-                    MetricTile(
-                        label: "Uploaded",
-                        value: "\(model.uploadedCount)",
-                        footnote: "of \(model.totalLibraryCount)"
-                    )
-                    MetricTile(
-                        label: "Pending",
-                        value: "\(model.pendingCount)",
-                        footnote: model.isSyncing ? "live queue" : "waiting"
-                    )
-                    MetricTile(
-                        label: "Transferred",
-                        value: byteFormatter.string(fromByteCount: model.syncMetrics.uploadedBytes),
-                        footnote: totalByteCaption
-                    )
-                    MetricTile(
-                        label: "ETA",
-                        value: etaCaption,
-                        footnote: speedCaption
-                    )
+                if compact {
+                    VStack(spacing: 12) {
+                        metricTiles
+                    }
+                } else {
+                    LazyVGrid(
+                        columns: [
+                            GridItem(.flexible(), spacing: 12),
+                            GridItem(.flexible(), spacing: 12)
+                        ],
+                        spacing: 12
+                    ) {
+                        metricTiles
+                    }
                 }
 
                 if let currentFileName = model.syncMetrics.currentFileName {
@@ -190,7 +184,8 @@ struct DashboardView: View {
                         Text(currentFileName)
                             .font(.system(.body, design: .rounded).weight(.semibold))
                             .foregroundStyle(.primary)
-                            .lineLimit(1)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         ProgressView(value: model.syncMetrics.progressFraction)
                             .tint(Color(red: 0.15, green: 0.48, blue: 0.87))
@@ -210,6 +205,7 @@ struct DashboardView: View {
                     Text("Uploaded items will appear here after the first successful sync.")
                         .font(.system(.body, design: .rounded))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else {
                     ForEach(model.recentUploads) { upload in
                         HStack(alignment: .center, spacing: 12) {
@@ -260,11 +256,87 @@ struct DashboardView: View {
                 Text("Google Photos now limits the Library API to app-created content. This app uses a user-initiated upload flow, tracks already-uploaded Apple Photos locally on-device, and resumes incrementally on future launches.")
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 Text("Long-running background sync is best-effort on iOS. The app continues while iOS grants background time, then resumes quickly the next time the app becomes active.")
                     .font(.system(.body, design: .rounded))
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var metricTiles: some View {
+        MetricTile(
+            label: "Uploaded",
+            value: "\(model.uploadedCount)",
+            footnote: "of \(model.totalLibraryCount)"
+        )
+        MetricTile(
+            label: "Pending",
+            value: "\(model.pendingCount)",
+            footnote: model.isSyncing ? "live queue" : "waiting"
+        )
+        MetricTile(
+            label: "Transferred",
+            value: byteFormatter.string(fromByteCount: model.syncMetrics.uploadedBytes),
+            footnote: totalByteCaption
+        )
+        MetricTile(
+            label: "ETA",
+            value: etaCaption,
+            footnote: speedCaption
+        )
+    }
+
+    private func heroTextBlock(titleSize: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(model.statusTitle)
+                .font(.system(size: titleSize, weight: .bold, design: .rounded))
+                .foregroundStyle(Color(red: 0.12, green: 0.17, blue: 0.25))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Text(model.statusDetail)
+                .font(.system(.body, design: .rounded))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var heroBadges: some View {
+        ViewThatFits(in: .vertical) {
+            HStack(spacing: 10) {
+                photoBadge
+                accountBadge
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                photoBadge
+                accountBadge
+            }
+        }
+    }
+
+    private var photoBadge: some View {
+        Label(
+            model.photoAccessState.isGranted ? "Photos Ready" : "Photos Locked",
+            systemImage: model.photoAccessState.isGranted ? "checkmark.shield.fill" : "lock.fill"
+        )
+        .modifier(
+            PillStyle(
+                fill: model.photoAccessState.isGranted ? Color.green.opacity(0.16) : Color.orange.opacity(0.16),
+                foreground: model.photoAccessState.isGranted ? .green : .orange
+            )
+        )
+    }
+
+    @ViewBuilder
+    private var accountBadge: some View {
+        if let email = model.userProfile?.email {
+            Label(email, systemImage: "person.crop.circle.fill")
+                .modifier(PillStyle(fill: Color.blue.opacity(0.12), foreground: Color.blue))
         }
     }
 
@@ -305,6 +377,7 @@ struct DashboardView: View {
             .background(statusColor.opacity(0.16))
             .foregroundStyle(statusColor)
             .clipShape(Capsule())
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var statusText: String {
@@ -349,6 +422,7 @@ private struct CardShell<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             content
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(18)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .overlay {
@@ -369,12 +443,15 @@ private struct MetricTile: View {
             Text(label.uppercased())
                 .font(.system(.caption, design: .rounded).weight(.bold))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
             Text(value)
                 .font(.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
             Text(footnote)
                 .font(.system(.footnote, design: .rounded))
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
@@ -426,6 +503,7 @@ private struct PillStyle: ViewModifier {
             .padding(.vertical, 8)
             .background(fill, in: Capsule())
             .foregroundStyle(foreground)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

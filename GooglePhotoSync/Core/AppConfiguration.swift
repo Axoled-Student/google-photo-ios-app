@@ -25,10 +25,7 @@ struct AppConfiguration: Sendable {
     }
 
     var configurationMessage: String {
-        """
-        Add a Google OAuth client for iOS in `Config/Base.xcconfig`, then set \
-        `GOOGLE_CLIENT_ID`, `GOOGLE_REDIRECT_SCHEME`, and `GOOGLE_REDIRECT_URI`.
-        """
+        "This build is missing Google sign-in setup. Install the latest IPA or rebuild with your iOS OAuth client."
     }
 
     var redirectURL: URL? {

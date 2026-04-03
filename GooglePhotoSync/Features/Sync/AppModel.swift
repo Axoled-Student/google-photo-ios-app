@@ -61,7 +61,7 @@ final class AppModel {
 
     var primaryActionTitle: String {
         if !configuration.isConfigured {
-            return "Add OAuth Config"
+            return "Install Latest Build"
         }
 
         if isSigningIn {
@@ -481,7 +481,7 @@ final class AppModel {
 
     private func updateStatus() {
         if !configuration.isConfigured {
-            statusTitle = "iOS OAuth setup required"
+            statusTitle = "Google sign-in missing"
             statusDetail = configuration.configurationMessage
             return
         }
