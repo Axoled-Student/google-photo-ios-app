@@ -1,6 +1,6 @@
 // Create a native iOS OAuth client in Google Cloud.
 // Do not paste the desktop `client_secret.json` values into this app target.
-GOOGLE_CLIENT_ID = REPLACE_WITH_IOS_CLIENT_ID
-GOOGLE_REDIRECT_SCHEME = REPLACE_WITH_IOS_REDIRECT_SCHEME
-GOOGLE_REDIRECT_URI = REPLACE_WITH_IOS_REDIRECT_URI
+GOOGLE_CLIENT_ID = 76348797949-15r4emnhrfr0q7b9pdh9ehn2m6e3s3ut.apps.googleusercontent.com
+GOOGLE_REDIRECT_SCHEME = com.googleusercontent.apps.76348797949-15r4emnhrfr0q7b9pdh9ehn2m6e3s3ut
+GOOGLE_REDIRECT_URI = com.googleusercontent.apps.76348797949-15r4emnhrfr0q7b9pdh9ehn2m6e3s3ut:/oauthredirect
 GOOGLE_PHOTOS_ALBUM_TITLE = Camera Roll Backup

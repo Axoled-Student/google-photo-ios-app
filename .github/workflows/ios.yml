@@ -37,3 +37,32 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Build unsigned iPhoneOS app
+        run: |
+          rm -rf build-output
+          xcodebuild \
+            -project GooglePhotoSync.xcodeproj \
+            -scheme GooglePhotoSync \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build-output \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        run: |
+          rm -rf ipa Payload
+          mkdir -p Payload
+          cp -R build-output/Build/Products/Release-iphoneos/GooglePhotoSync.app Payload/
+          mkdir -p ipa
+          zip -qry ipa/GooglePhotoSync-unsigned.ipa Payload
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GooglePhotoSync-unsigned-ipa
+          path: ipa/GooglePhotoSync-unsigned.ipa
+          if-no-files-found: error
