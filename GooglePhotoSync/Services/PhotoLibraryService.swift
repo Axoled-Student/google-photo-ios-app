@@ -167,7 +167,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     private func write(resource: PHAssetResource, to url: URL) async throws {
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: nil) { error in
                 if let error {
                     continuation.resume(throwing: error)
