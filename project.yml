@@ -44,5 +44,22 @@ targets:
       - package: AppAuth
     scheme:
       gatherCoverageData: false
-      testTargets: []
+      testTargets:
+        - GooglePhotoSyncUITests
 
+  GooglePhotoSyncUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: 17.0
+    sources:
+      - path: GooglePhotoSyncUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.GooglePhotoSyncUITests
+        PRODUCT_NAME: GooglePhotoSyncUITests
+        SWIFT_VERSION: 5.10
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: GooglePhotoSync
+        CODE_SIGN_STYLE: Automatic
+    dependencies:
+      - target: GooglePhotoSync

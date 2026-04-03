@@ -29,6 +29,36 @@ jobs:
       - name: Resolve packages
         run: xcodebuild -resolvePackageDependencies -project GooglePhotoSync.xcodeproj -scheme GooglePhotoSync
 
+      - name: Create booted simulator
+        run: |
+          set -euo pipefail
+          RUNTIME_ID="$(xcrun simctl list runtimes available -j | python3 -c "import json,sys; runtimes=[r for r in json.load(sys.stdin)['runtimes'] if r.get('platform') == 'iOS']; runtimes.sort(key=lambda r: r.get('version', '0')); print(runtimes[-1]['identifier'])")"
+          DEVICE_TYPE_ID="$(xcrun simctl list devicetypes available -j | python3 -c "import json,sys; data=json.load(sys.stdin)['devicetypes']; preferred=['iPhone 16 Pro','iPhone 16','iPhone 15 Pro','iPhone 15']; lookup={item['name']: item['identifier'] for item in data}; selected=next((lookup[name] for name in preferred if name in lookup), data[0]['identifier']); print(selected)")"
+          SIMULATOR_UDID="$(xcrun simctl create GooglePhotoSync-CI "$DEVICE_TYPE_ID" "$RUNTIME_ID")"
+          xcrun simctl boot "$SIMULATOR_UDID"
+          xcrun simctl bootstatus "$SIMULATOR_UDID" -b
+          echo "SIMULATOR_UDID=$SIMULATOR_UDID" >> "$GITHUB_ENV"
+
+      - name: Run UI smoke tests
+        run: |
+          set -euo pipefail
+          rm -rf TestResults.xcresult
+          xcodebuild \
+            -project GooglePhotoSync.xcodeproj \
+            -scheme GooglePhotoSync \
+            -destination "id=$SIMULATOR_UDID" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GooglePhotoSync-test-results
+          path: TestResults.xcresult
+          if-no-files-found: error
+
       - name: Build for iOS Simulator
         run: |
           xcodebuild \
