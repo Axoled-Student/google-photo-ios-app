@@ -30,7 +30,7 @@ final class AppModel {
     var lastSyncDate: Date?
 
     private let authService: GoogleOAuthService
-    private let photoLibraryService: PhotoLibraryService
+    private var photoLibraryService: PhotoLibraryService?
     private let manifestStore = UploadManifestStore()
     private let googlePhotosAPI: GooglePhotosAPI
     private let skipsBootstrapWork: Bool
@@ -41,25 +41,20 @@ final class AppModel {
     init() {
         let configuration = AppConfiguration.load()
         let authService = GoogleOAuthService(configuration: configuration)
-        let photoLibraryService = PhotoLibraryService()
         let skipsBootstrapWork = ProcessInfo.processInfo.environment["UITEST_DISABLE_BOOTSTRAP"] == "1"
 
         self.configuration = configuration
         self.authService = authService
-        self.photoLibraryService = photoLibraryService
+        self.photoLibraryService = nil
         self.googlePhotosAPI = GooglePhotosAPI { [authService] in
             try await authService.freshAccessToken()
         }
         self.skipsBootstrapWork = skipsBootstrapWork
         self.userProfile = authService.profile
-        self.photoAccessState = photoLibraryService.currentAuthorizationState()
+        self.photoAccessState = PhotoLibraryService.currentAuthorizationState()
         self.isSignedIn = authService.isSignedIn
         self.statusTitle = "Connect your Google account"
         self.statusDetail = "Google Photo Sync uploads your Apple Photos library into Google Photos."
-
-        photoLibraryService.onLibraryChange = { [weak self] in
-            self?.handleLibraryChange()
-        }
 
         updateStatus()
     }
@@ -188,7 +183,7 @@ final class AppModel {
             isSignedIn = true
 
             if photoAccessState == .notDetermined {
-                photoAccessState = await photoLibraryService.requestAuthorization()
+                photoAccessState = await ensurePhotoLibraryService().requestAuthorization()
             }
 
             await refreshLocalState()
@@ -202,7 +197,7 @@ final class AppModel {
     }
 
     private func requestPhotoAccess() async {
-        photoAccessState = await photoLibraryService.requestAuthorization()
+        photoAccessState = await ensurePhotoLibraryService().requestAuthorization()
         await refreshLocalState()
 
         if photoAccessState.isGranted, pendingCount > 0 {
@@ -451,6 +446,19 @@ final class AppModel {
                 pendingCount: descriptors.count
             )
         }.value
+    }
+
+    private func ensurePhotoLibraryService() -> PhotoLibraryService {
+        if let photoLibraryService {
+            return photoLibraryService
+        }
+
+        let photoLibraryService = PhotoLibraryService()
+        photoLibraryService.onLibraryChange = { [weak self] in
+            self?.handleLibraryChange()
+        }
+        self.photoLibraryService = photoLibraryService
+        return photoLibraryService
     }
 
     private func handleLibraryChange() {

@@ -43,6 +43,8 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Google Photo Sync needs access to your library to upload and sync your photos to Google Photos.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Google Photo Sync needs access to your library to upload and sync your photos to Google Photos.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UIBackgroundModes</key>
@@ -56,4 +58,3 @@
 	</array>
 </dict>
 </plist>
-

@@ -46,6 +46,10 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     func currentAuthorizationState() -> PhotoAccessState {
+        Self.currentAuthorizationState()
+    }
+
+    nonisolated static func currentAuthorizationState() -> PhotoAccessState {
         switch PHPhotoLibrary.authorizationStatus(for: .readWrite) {
         case .authorized:
             return .authorized
