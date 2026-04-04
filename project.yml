@@ -22,10 +22,13 @@ targets:
           - Resources/GoogleOAuthClient.plist
     resources:
       - path: GooglePhotoSync/Resources/GoogleOAuthClient.plist
+      - path: GooglePhotoSync/Resources/LaunchScreen.storyboard
     info:
       path: GooglePhotoSync/Resources/Info.plist
       properties:
         CFBundleDisplayName: Google Photo Sync
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         GoogleOAuthClientID: $(GOOGLE_CLIENT_ID)
         GoogleOAuthRedirectURI: $(GOOGLE_REDIRECT_URI)
         GoogleOAuthRedirectScheme: $(GOOGLE_REDIRECT_SCHEME)
@@ -34,6 +37,7 @@ targets:
         NSPhotoLibraryUsageDescription: Google Photo Sync needs access to your library to upload and sync your photos to Google Photos.
         NSPhotoLibraryAddUsageDescription: Google Photo Sync needs access to your library to upload and sync your photos to Google Photos.
         UIApplicationSupportsIndirectInputEvents: true
+        UILaunchStoryboardName: LaunchScreen
         UIBackgroundModes:
           - fetch
           - processing

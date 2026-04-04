@@ -117,6 +117,24 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             build
 
+      - name: Verify release app bundle contents
+        run: |
+          set -euo pipefail
+          APP_PATH="build-output/Build/Products/Release-iphoneos/GooglePhotoSync.app"
+          INFO_PLIST="$APP_PATH/Info.plist"
+
+          test -d "$APP_PATH/LaunchScreen.storyboardc"
+
+          LAUNCH_NAME="$(/usr/libexec/PlistBuddy -c 'Print :UILaunchStoryboardName' "$INFO_PLIST")"
+          VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$INFO_PLIST")"
+          BUILD="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$INFO_PLIST")"
+          CLIENT_ID="$(/usr/libexec/PlistBuddy -c 'Print :GoogleOAuthClientID' "$INFO_PLIST")"
+
+          [[ "$LAUNCH_NAME" == "LaunchScreen" ]]
+          [[ "$VERSION" == "1.0.1" ]]
+          [[ "$BUILD" == "2" ]]
+          [[ -n "$CLIENT_ID" ]]
+
       - name: Package unsigned IPA
         run: |
           rm -rf ipa Payload
