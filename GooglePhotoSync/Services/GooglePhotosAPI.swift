@@ -137,7 +137,7 @@ final class GooglePhotosAPI {
 
         if let status = result.status {
             let statusCode = status.code ?? 0
-            if statusCode != 0 || status.message != nil {
+            if statusCode != 0 {
                 throw GooglePhotosAPIError.apiMessage(
                     status.message ?? "Google Photos failed to create the media item."
                 )
