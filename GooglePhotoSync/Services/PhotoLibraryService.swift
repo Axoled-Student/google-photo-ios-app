@@ -33,6 +33,11 @@ enum PhotoLibraryServiceError: LocalizedError {
     }
 }
 
+struct PhotoLibraryScanSnapshot: Sendable {
+    let totalCount: Int
+    let descriptors: [LibraryAssetDescriptor]
+}
+
 final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     var onLibraryChange: (@MainActor () -> Void)?
 
@@ -93,22 +98,23 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         Self.fetchDescriptors(excluding: uploadedIdentifiers)
     }
 
+    func scanSnapshot(excluding uploadedIdentifiers: Set<String>) -> PhotoLibraryScanSnapshot {
+        Self.scanSnapshot(excluding: uploadedIdentifiers)
+    }
+
     nonisolated static func syncableAssetCount() -> Int {
-        let fetchResult = PHAsset.fetchAssets(with: PHFetchOptions())
-        var count = 0
-        fetchResult.enumerateObjects { asset, _, _ in
-            if asset.mediaType == .image || asset.mediaType == .video {
-                count += 1
-            }
-        }
-        return count
+        scanSnapshot(excluding: []).totalCount
     }
 
     nonisolated static func fetchDescriptors(excluding uploadedIdentifiers: Set<String>) -> [LibraryAssetDescriptor] {
+        scanSnapshot(excluding: uploadedIdentifiers).descriptors
+    }
+
+    nonisolated static func scanSnapshot(excluding uploadedIdentifiers: Set<String>) -> PhotoLibraryScanSnapshot {
         let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
 
         let assets = PHAsset.fetchAssets(with: options)
+        var totalCount = 0
         var descriptors: [LibraryAssetDescriptor] = []
         descriptors.reserveCapacity(assets.count)
 
@@ -116,6 +122,8 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             guard asset.mediaType == .image || asset.mediaType == .video else {
                 return
             }
+
+            totalCount += 1
 
             guard !uploadedIdentifiers.contains(asset.localIdentifier) else {
                 return
@@ -137,7 +145,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             )
         }
 
-        return descriptors
+        return PhotoLibraryScanSnapshot(totalCount: totalCount, descriptors: descriptors)
     }
 
     func prepareAsset(for descriptor: LibraryAssetDescriptor) async throws -> PreparedAsset {
@@ -179,8 +187,11 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     }
 
     private func write(resource: PHAssetResource, to url: URL) async throws {
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: nil) { error in
+            PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: options) { error in
                 if let error {
                     continuation.resume(throwing: error)
                     return

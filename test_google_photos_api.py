@@ -112,6 +112,82 @@ def upload_bytes(
     return response.text.strip()
 
 
+def start_resumable_upload(creds: Credentials, content_type: str, raw_size: int) -> tuple[str, int]:
+    response = requests.post(
+        UPLOAD_URL,
+        headers=auth_headers(
+            creds,
+            **{
+                "Content-Length": "0",
+                "X-Goog-Upload-Command": "start",
+                "X-Goog-Upload-Protocol": "resumable",
+                "X-Goog-Upload-Content-Type": content_type,
+                "X-Goog-Upload-Raw-Size": str(raw_size),
+            },
+        ),
+        timeout=60,
+    )
+    if not response.ok:
+        fail(response, "Resumable upload session creation")
+
+    upload_url = response.headers.get("X-Goog-Upload-URL")
+    if not upload_url:
+        print("Missing X-Goog-Upload-URL in resumable upload response.", file=sys.stderr)
+        raise SystemExit(1)
+
+    granularity = int(response.headers.get("X-Goog-Upload-Chunk-Granularity", "262144"))
+    return upload_url, granularity
+
+
+def upload_bytes_resumable(
+    creds: Credentials,
+    filename: str,
+    media_bytes: bytes,
+    content_type: str,
+    chunk_size_bytes: int,
+) -> str:
+    upload_url, chunk_granularity = start_resumable_upload(
+        creds,
+        content_type=content_type,
+        raw_size=len(media_bytes),
+    )
+
+    normalized_chunk_size = max(
+        chunk_granularity,
+        chunk_size_bytes - (chunk_size_bytes % chunk_granularity),
+    )
+
+    offset = 0
+    while offset < len(media_bytes):
+        chunk = media_bytes[offset : offset + normalized_chunk_size]
+        finalize = offset + len(chunk) >= len(media_bytes)
+        response = requests.post(
+            upload_url,
+            headers={
+                "Content-Length": str(len(chunk)),
+                "X-Goog-Upload-Command": "upload, finalize" if finalize else "upload",
+                "X-Goog-Upload-Offset": str(offset),
+            },
+            data=chunk,
+            timeout=120,
+        )
+        if not response.ok:
+            fail(response, f"Resumable upload chunk at offset {offset}")
+
+        offset += len(chunk)
+        print(f"Uploaded {offset:,}/{len(media_bytes):,} bytes via resumable upload for {filename}")
+
+        if finalize:
+            upload_token = response.text.strip()
+            if not upload_token:
+                print("Google Photos did not return an upload token.", file=sys.stderr)
+                raise SystemExit(1)
+            return upload_token
+
+    print("Resumable upload finished without an upload token.", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def create_media_item(
     creds: Credentials, album_id: str, upload_token: str, filename: str
 ) -> dict:
@@ -225,6 +301,18 @@ def main() -> int:
         "--file",
         help="Optional local image file to upload instead of the generated BMP.",
     )
+    parser.add_argument(
+        "--protocol",
+        choices=("raw", "resumable"),
+        default="raw",
+        help="Upload protocol to test. Use 'resumable' to mirror the iOS app path.",
+    )
+    parser.add_argument(
+        "--chunk-size-mb",
+        type=int,
+        default=4,
+        help="Chunk size to use for resumable uploads.",
+    )
     args = parser.parse_args()
 
     client_secrets = Path(args.client_secrets).expanduser().resolve()
@@ -251,7 +339,16 @@ def main() -> int:
     print(f"Album created: {album_id}")
 
     print("Uploading image bytes...")
-    upload_token = upload_bytes(creds, filename, media_bytes, content_type)
+    if args.protocol == "resumable":
+        upload_token = upload_bytes_resumable(
+            creds,
+            filename,
+            media_bytes,
+            content_type,
+            chunk_size_bytes=args.chunk_size_mb * 1024 * 1024,
+        )
+    else:
+        upload_token = upload_bytes(creds, filename, media_bytes, content_type)
     print("Upload token received.")
 
     print("Creating media item...")

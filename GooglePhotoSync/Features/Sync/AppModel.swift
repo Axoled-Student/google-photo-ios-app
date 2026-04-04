@@ -6,11 +6,6 @@ import UIKit
 @MainActor
 @Observable
 final class AppModel {
-    private struct LocalLibrarySnapshot: Sendable {
-        let totalLibraryCount: Int
-        let pendingCount: Int
-    }
-
     let configuration: AppConfiguration
 
     var userProfile: GoogleUserProfile?
@@ -245,13 +240,11 @@ final class AppModel {
 
         do {
             let uploadedIdentifiers = try await manifestStore.uploadedIdentifiers()
-            let librarySnapshot = await scanLibrary(excluding: uploadedIdentifiers)
-            let assets = await Task.detached(priority: .userInitiated) {
-                PhotoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers)
-            }.value
+            let librarySnapshot = await scanLibrarySnapshot(excluding: uploadedIdentifiers)
+            let assets = librarySnapshot.descriptors
             let photoLibraryService = ensurePhotoLibraryService()
 
-            totalLibraryCount = librarySnapshot.totalLibraryCount
+            totalLibraryCount = librarySnapshot.totalCount
             uploadedCount = uploadedIdentifiers.count
             pendingCount = assets.count
 
@@ -289,8 +282,23 @@ final class AppModel {
                 syncMetrics.detailText = "Preparing \(index + 1) of \(assets.count)"
                 syncMetrics.updatedAt = .now
 
+                let prepared: PreparedAsset
                 do {
-                    let prepared = try await photoLibraryService.prepareAsset(for: asset)
+                    prepared = try await photoLibraryService.prepareAsset(for: asset)
+                } catch {
+                    syncMetrics.completedItems = index + 1
+                    syncMetrics.estimatedTotalBytes = max(
+                        syncMetrics.uploadedBytes,
+                        syncMetrics.estimatedTotalBytes - asset.estimatedByteCount
+                    )
+                    syncMetrics.currentFileName = asset.fileName
+                    syncMetrics.detailText = "Skipped unavailable item \(index + 1) of \(assets.count)"
+                    syncMetrics.updatedAt = .now
+                    pendingCount = max(assets.count - (index + 1), 0)
+                    continue
+                }
+
+                do {
                     defer {
                         try? FileManager.default.removeItem(at: prepared.fileURL)
                     }
@@ -421,9 +429,9 @@ final class AppModel {
             }
             uploadedCount = try await manifestStore.uploadedCount()
             let uploadedIdentifiers = try await manifestStore.uploadedIdentifiers()
-            let librarySnapshot = await scanLibrary(excluding: uploadedIdentifiers)
-            totalLibraryCount = librarySnapshot.totalLibraryCount
-            pendingCount = librarySnapshot.pendingCount
+            let librarySnapshot = await scanLibrarySnapshot(excluding: uploadedIdentifiers)
+            totalLibraryCount = librarySnapshot.totalCount
+            pendingCount = librarySnapshot.descriptors.count
             lastSyncDate = manifestEntries.first?.uploadedAt ?? lastSyncDate
             if syncMetrics.phase != .failed {
                 lastErrorMessage = nil
@@ -435,17 +443,13 @@ final class AppModel {
         updateStatus()
     }
 
-    private func scanLibrary(excluding uploadedIdentifiers: Set<String>) async -> LocalLibrarySnapshot {
+    private func scanLibrarySnapshot(excluding uploadedIdentifiers: Set<String>) async -> PhotoLibraryScanSnapshot {
         guard photoAccessState.isGranted else {
-            return LocalLibrarySnapshot(totalLibraryCount: 0, pendingCount: 0)
+            return PhotoLibraryScanSnapshot(totalCount: 0, descriptors: [])
         }
 
         return await Task.detached(priority: .userInitiated) {
-            let descriptors = PhotoLibraryService.fetchDescriptors(excluding: uploadedIdentifiers)
-            return LocalLibrarySnapshot(
-                totalLibraryCount: PhotoLibraryService.syncableAssetCount(),
-                pendingCount: descriptors.count
-            )
+            PhotoLibraryService.scanSnapshot(excluding: uploadedIdentifiers)
         }.value
     }
 
