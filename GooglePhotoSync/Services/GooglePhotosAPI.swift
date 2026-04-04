@@ -52,7 +52,7 @@ final class GooglePhotosAPI {
             try? handle.close()
         }
 
-        let preferredChunkSize = max(uploadSession.chunkGranularity, 4 * 1024 * 1024)
+        let preferredChunkSize = max(uploadSession.chunkGranularity, 1 * 1024 * 1024)
         let normalizedChunkSize = preferredChunkSize - (preferredChunkSize % uploadSession.chunkGranularity)
         let chunkSize = max(normalizedChunkSize, uploadSession.chunkGranularity)
 

@@ -222,7 +222,10 @@ final class AppModel {
         pendingResync = false
         lastErrorMessage = nil
         syncMetrics.phase = .preparing
+        syncMetrics.currentItemProgress = 0
         syncMetrics.detailText = "Scanning your Apple Photos library for items to upload."
+        syncMetrics.activeTransferStartedAt = nil
+        syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
         syncMetrics.updatedAt = .now
         updateStatus()
 
@@ -279,12 +282,24 @@ final class AppModel {
 
                 syncMetrics.phase = .preparing
                 syncMetrics.currentFileName = asset.fileName
+                syncMetrics.currentItemProgress = 0
                 syncMetrics.detailText = "Preparing \(index + 1) of \(assets.count)"
+                syncMetrics.activeTransferStartedAt = nil
+                syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
                 syncMetrics.updatedAt = .now
 
                 let prepared: PreparedAsset
                 do {
-                    prepared = try await photoLibraryService.prepareAsset(for: asset)
+                    prepared = try await photoLibraryService.prepareAsset(for: asset) { [weak self] progress, stage in
+                        await MainActor.run {
+                            guard let self else { return }
+                            self.syncMetrics.phase = .preparing
+                            self.syncMetrics.currentFileName = asset.fileName
+                            self.syncMetrics.currentItemProgress = progress
+                            self.syncMetrics.detailText = "\(stage) \(index + 1) of \(assets.count)"
+                            self.syncMetrics.updatedAt = .now
+                        }
+                    }
                 } catch {
                     syncMetrics.completedItems = index + 1
                     syncMetrics.estimatedTotalBytes = max(
@@ -292,6 +307,7 @@ final class AppModel {
                         syncMetrics.estimatedTotalBytes - asset.estimatedByteCount
                     )
                     syncMetrics.currentFileName = asset.fileName
+                    syncMetrics.currentItemProgress = 0
                     syncMetrics.detailText = "Skipped unavailable item \(index + 1) of \(assets.count)"
                     syncMetrics.updatedAt = .now
                     pendingCount = max(assets.count - (index + 1), 0)
@@ -322,6 +338,7 @@ final class AppModel {
                             syncMetrics.estimatedTotalBytes - prepared.fileSize
                         )
                         syncMetrics.currentFileName = asset.fileName
+                        syncMetrics.currentItemProgress = 1
                         syncMetrics.detailText = "Skipped duplicate \(index + 1) of \(assets.count)"
                         syncMetrics.updatedAt = .now
 
@@ -336,9 +353,9 @@ final class AppModel {
                     )
 
                     let baseUploadedBytes = syncMetrics.uploadedBytes
-                    if syncMetrics.activeTransferStartedAt == nil {
-                        syncMetrics.activeTransferStartedAt = .now
-                    }
+                    syncMetrics.activeTransferStartedAt = .now
+                    syncMetrics.activeTransferBaselineBytes = baseUploadedBytes
+                    syncMetrics.currentItemProgress = 0
 
                     let uploadToken = try await googlePhotosAPI.uploadFile(
                         at: prepared.fileURL,
@@ -349,6 +366,10 @@ final class AppModel {
                             self.syncMetrics.phase = .uploading
                             self.syncMetrics.currentFileName = asset.fileName
                             self.syncMetrics.uploadedBytes = baseUploadedBytes + bytesSent
+                            self.syncMetrics.currentItemProgress = min(
+                                max(Double(bytesSent) / Double(max(prepared.fileSize, 1)), 0),
+                                1
+                            )
                             self.syncMetrics.detailText = "Uploading \(index + 1) of \(assets.count)"
                             self.syncMetrics.updatedAt = .now
                         }
@@ -374,7 +395,10 @@ final class AppModel {
 
                     syncMetrics.completedItems = index + 1
                     syncMetrics.uploadedBytes = baseUploadedBytes + prepared.fileSize
+                    syncMetrics.currentItemProgress = 1
                     syncMetrics.detailText = "Uploaded \(index + 1) of \(assets.count)"
+                    syncMetrics.activeTransferStartedAt = nil
+                    syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
                     syncMetrics.updatedAt = .now
 
                     uploadedCount += 1
@@ -395,19 +419,23 @@ final class AppModel {
 
             syncMetrics.phase = .syncingComplete
             syncMetrics.activeTransferStartedAt = nil
+            syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
             syncMetrics.currentFileName = nil
+            syncMetrics.currentItemProgress = 0
             syncMetrics.detailText = "Sync complete. New photos will queue automatically."
             syncMetrics.updatedAt = .now
             await refreshLocalState()
         } catch is CancellationError {
             syncMetrics = SyncMetrics()
             syncMetrics.activeTransferStartedAt = nil
+            syncMetrics.activeTransferBaselineBytes = 0
             syncMetrics.detailText = "Sync paused."
             syncMetrics.updatedAt = .now
         } catch {
             lastErrorMessage = error.localizedDescription
             syncMetrics.phase = .failed
             syncMetrics.activeTransferStartedAt = nil
+            syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
             syncMetrics.detailText = error.localizedDescription
             syncMetrics.updatedAt = .now
             await refreshLocalState()

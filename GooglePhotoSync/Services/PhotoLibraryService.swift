@@ -158,7 +158,10 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         return PhotoLibraryScanSnapshot(totalCount: totalCount, descriptors: descriptors)
     }
 
-    func prepareAsset(for descriptor: LibraryAssetDescriptor) async throws -> PreparedAsset {
+    func prepareAsset(
+        for descriptor: LibraryAssetDescriptor,
+        onProgress: @escaping @Sendable (Double, String) async -> Void = { _, _ in }
+    ) async throws -> PreparedAsset {
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [descriptor.localIdentifier], options: nil)
         guard let asset = fetchResult.firstObject else {
             throw PhotoLibraryServiceError.assetUnavailable
@@ -169,9 +172,13 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
 
         let url = try await exportAsset(
             asset: asset,
+            resource: resource,
             kind: descriptor.kind,
-            originalFilename: originalFilename
+            originalFilename: originalFilename,
+            onProgress: onProgress
         )
+
+        await onProgress(1, "Calculating fingerprint")
 
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         guard let fileSize = values.fileSize else {
@@ -195,22 +202,80 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
 
     private func exportAsset(
         asset: PHAsset,
+        resource: PHAssetResource?,
         kind: MediaAssetKind,
-        originalFilename: String
+        originalFilename: String,
+        onProgress: @escaping @Sendable (Double, String) async -> Void
     ) async throws -> URL {
+        if let resource {
+            do {
+                return try await exportPrimaryResource(
+                    resource,
+                    fallbackFilename: originalFilename,
+                    onProgress: onProgress
+                )
+            } catch {
+                await onProgress(0, "Retrying export")
+            }
+        }
+
         switch kind {
         case .photo:
-            return try await exportPhoto(asset: asset, originalFilename: originalFilename)
+            return try await exportPhoto(
+                asset: asset,
+                originalFilename: originalFilename,
+                onProgress: onProgress
+            )
         case .video:
-            return try await exportVideo(asset: asset, originalFilename: originalFilename)
+            return try await exportVideo(
+                asset: asset,
+                originalFilename: originalFilename,
+                onProgress: onProgress
+            )
         }
     }
 
-    private func exportPhoto(asset: PHAsset, originalFilename: String) async throws -> URL {
+    private func exportPrimaryResource(
+        _ resource: PHAssetResource,
+        fallbackFilename: String,
+        onProgress: @escaping @Sendable (Double, String) async -> Void
+    ) async throws -> URL {
+        let resourceFilename = resource.originalFilename.isEmpty ? fallbackFilename : resource.originalFilename
+        let destinationURL = Self.exportURL(for: resourceFilename)
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.progressHandler = { progress in
+            Task {
+                await onProgress(progress, "Downloading from Apple Photos")
+            }
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHAssetResourceManager.default().writeData(for: resource, toFile: destinationURL, options: options) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                continuation.resume(returning: ())
+            }
+        }
+
+        return destinationURL
+    }
+
+    private func exportPhoto(
+        asset: PHAsset,
+        originalFilename: String,
+        onProgress: @escaping @Sendable (Double, String) async -> Void
+    ) async throws -> URL {
+        await onProgress(0, "Preparing photo")
+
         if let sourceURL = await requestFullSizeImageURL(for: asset) {
             let filename = sourceURL.lastPathComponent.isEmpty ? originalFilename : sourceURL.lastPathComponent
             let destinationURL = Self.exportURL(for: filename)
             try Self.copyItem(at: sourceURL, to: destinationURL)
+            await onProgress(1, "Photo ready")
             return destinationURL
         }
 
@@ -223,20 +288,32 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             )
         )
         try imageData.write(to: destinationURL, options: .atomic)
+        await onProgress(1, "Photo ready")
         return destinationURL
     }
 
-    private func exportVideo(asset: PHAsset, originalFilename: String) async throws -> URL {
+    private func exportVideo(
+        asset: PHAsset,
+        originalFilename: String,
+        onProgress: @escaping @Sendable (Double, String) async -> Void
+    ) async throws -> URL {
+        await onProgress(0, "Preparing video")
+
         let videoAsset = try await requestVideoAsset(for: asset)
 
         if let urlAsset = videoAsset as? AVURLAsset, urlAsset.url.isFileURL {
             let filename = urlAsset.url.lastPathComponent.isEmpty ? originalFilename : urlAsset.url.lastPathComponent
             let destinationURL = Self.exportURL(for: filename)
             try Self.copyItem(at: urlAsset.url, to: destinationURL)
+            await onProgress(1, "Video ready")
             return destinationURL
         }
 
-        return try await exportVideoAsset(videoAsset, originalFilename: originalFilename)
+        return try await exportVideoAsset(
+            videoAsset,
+            originalFilename: originalFilename,
+            onProgress: onProgress
+        )
     }
 
     private func requestFullSizeImageURL(for asset: PHAsset) async -> URL? {
@@ -296,7 +373,11 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
-    private func exportVideoAsset(_ videoAsset: AVAsset, originalFilename: String) async throws -> URL {
+    private func exportVideoAsset(
+        _ videoAsset: AVAsset,
+        originalFilename: String,
+        onProgress: @escaping @Sendable (Double, String) async -> Void
+    ) async throws -> URL {
         guard let exportSession = AVAssetExportSession(
             asset: videoAsset,
             presetName: AVAssetExportPresetPassthrough
@@ -329,6 +410,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         exportSession.outputURL = destinationURL
         exportSession.outputFileType = outputFileType
         exportSession.shouldOptimizeForNetworkUse = false
+        await onProgress(0, "Exporting video")
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             exportSession.exportAsynchronously {
@@ -345,6 +427,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             }
         }
 
+        await onProgress(1, "Video ready")
         return destinationURL
     }
 

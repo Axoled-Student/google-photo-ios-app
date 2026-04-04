@@ -121,8 +121,10 @@ struct SyncMetrics: Equatable, Sendable {
     var uploadedBytes: Int64 = 0
     var estimatedTotalBytes: Int64 = 0
     var currentFileName: String?
+    var currentItemProgress: Double = 0
     var detailText: String = "Connect Google and allow Photos access to start."
     var activeTransferStartedAt: Date?
+    var activeTransferBaselineBytes: Int64 = 0
     var updatedAt: Date = .now
 
     var progressFraction: Double {
@@ -134,11 +136,17 @@ struct SyncMetrics: Equatable, Sendable {
         return min(max(Double(completedItems) / Double(totalItems), 0), 1)
     }
 
+    var currentItemProgressFraction: Double {
+        min(max(currentItemProgress, 0), 1)
+    }
+
     var bytesPerSecond: Double? {
-        guard let activeTransferStartedAt, uploadedBytes > 0 else { return nil }
+        guard let activeTransferStartedAt else { return nil }
         let elapsed = updatedAt.timeIntervalSince(activeTransferStartedAt)
+        let transferredBytes = max(uploadedBytes - activeTransferBaselineBytes, 0)
+        guard transferredBytes > 0 else { return nil }
         guard elapsed > 0.25 else { return nil }
-        return Double(uploadedBytes) / elapsed
+        return Double(transferredBytes) / elapsed
     }
 
     var estimatedRemainingSeconds: TimeInterval? {

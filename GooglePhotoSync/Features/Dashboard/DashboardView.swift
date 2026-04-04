@@ -231,7 +231,7 @@ struct DashboardView: View {
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        ProgressView(value: model.syncMetrics.progressFraction)
+                        ProgressView(value: model.syncMetrics.currentItemProgressFraction)
                             .tint(Color(red: 0.15, green: 0.48, blue: 0.87))
                     }
                 }
@@ -410,7 +410,7 @@ struct DashboardView: View {
     }
 
     private var progressCaption: String {
-        "\(Int(model.syncMetrics.progressFraction * 100))%"
+        "\(Int(model.syncMetrics.currentItemProgressFraction * 100))%"
     }
 
     private var buildCaption: String {
