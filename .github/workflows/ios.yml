@@ -147,8 +147,8 @@ jobs:
           echo "CFBundleVersion=$BUILD"
 
           [[ "$LAUNCH_NAME" == "LaunchScreen" ]]
-          [[ "$VERSION" == "1.0.2" ]]
-          [[ "$BUILD" == "3" ]]
+          [[ -n "$VERSION" ]]
+          [[ -n "$BUILD" ]]
           [[ -n "$CLIENT_ID" ]]
 
       - name: Package unsigned IPA

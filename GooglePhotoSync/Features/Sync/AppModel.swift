@@ -315,6 +315,7 @@ final class AppModel {
             self?.applySyncProgressSnapshot(snapshot, initialUploadedCount: initialUploadedCount)
         }
         let deduper = FingerprintUploadCoordinator(manifestStore: manifestStore)
+        let writeGate = GooglePhotosWriteGate(maxConcurrentWrites: 1)
         let manifestStore = self.manifestStore
         let googlePhotosAPI = self.googlePhotosAPI
         let totalCount = assets.count
@@ -332,6 +333,7 @@ final class AppModel {
                         totalCount: totalCount,
                         tracker: tracker,
                         deduper: deduper,
+                        writeGate: writeGate,
                         manifestStore: manifestStore,
                         googlePhotosAPI: googlePhotosAPI
                     ) { [weak self] entry in

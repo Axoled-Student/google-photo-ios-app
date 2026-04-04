@@ -242,6 +242,36 @@ enum FingerprintUploadResolution: Sendable {
     case newlyUploaded(UploadManifestEntry)
 }
 
+actor GooglePhotosWriteGate {
+    private var availablePermits: Int
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(maxConcurrentWrites: Int) {
+        self.availablePermits = max(maxConcurrentWrites, 1)
+    }
+
+    func acquire() async {
+        if availablePermits > 0 {
+            availablePermits -= 1
+            return
+        }
+
+        await withCheckedContinuation { continuation in
+            waiters.append(continuation)
+        }
+    }
+
+    func release() {
+        if let waiter = waiters.first {
+            waiters.removeFirst()
+            waiter.resume()
+            return
+        }
+
+        availablePermits += 1
+    }
+}
+
 actor FingerprintUploadCoordinator {
     private let manifestStore: UploadManifestStore
     private var inflightUploads: [String: Task<UploadManifestEntry, Error>] = [:]
@@ -291,6 +321,7 @@ enum SyncAssetProcessor {
         totalCount: Int,
         tracker: SyncProgressTracker,
         deduper: FingerprintUploadCoordinator,
+        writeGate: GooglePhotosWriteGate,
         manifestStore: UploadManifestStore,
         googlePhotosAPI: GooglePhotosAPI,
         onUploadedEntry: @escaping @MainActor @Sendable (UploadManifestEntry) -> Void
@@ -340,12 +371,24 @@ enum SyncAssetProcessor {
             assetID: descriptor.localIdentifier,
             actualSize: preparedAsset.fileSize
         )
+        await tracker.updatePreparing(
+            assetID: descriptor.localIdentifier,
+            progress: 1,
+            detail: "Waiting for Google Photos \(detailPrefix)"
+        )
 
         let resolution = try await deduper.resolveUpload(
             fingerprint: preparedAsset.contentFingerprint,
             fileName: descriptor.fileName,
             fileSize: preparedAsset.fileSize
         ) {
+            await writeGate.acquire()
+            defer {
+                Task {
+                    await writeGate.release()
+                }
+            }
+
             let uploadToken = try await googlePhotosAPI.uploadFile(
                 at: preparedAsset.fileURL,
                 mimeType: preparedAsset.mimeType

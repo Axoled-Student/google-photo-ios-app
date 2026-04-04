@@ -240,18 +240,40 @@ final class GooglePhotosAPI: @unchecked Sendable {
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
-        let (data, response) = try await session.data(for: request)
+        var attempt = 0
 
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw GooglePhotosAPIError.invalidHTTPResponse
+        while true {
+            do {
+                let (data, response) = try await session.data(for: request)
+
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw GooglePhotosAPIError.invalidHTTPResponse
+                }
+
+                guard (200..<300).contains(httpResponse.statusCode) else {
+                    let message = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
+                    if attempt < 4, Self.shouldRetry(statusCode: httpResponse.statusCode) {
+                        attempt += 1
+                        try await Self.sleepBeforeRetry(response: httpResponse, attempt: attempt)
+                        continue
+                    }
+
+                    throw GooglePhotosAPIError.httpStatus(code: httpResponse.statusCode, message: message)
+                }
+
+                return (data, httpResponse)
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                if attempt < 4, Self.shouldRetry(error: error) {
+                    attempt += 1
+                    try await Self.sleepBeforeRetry(response: nil, attempt: attempt)
+                    continue
+                }
+
+                throw error
+            }
         }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            let message = String(data: data, encoding: .utf8) ?? HTTPURLResponse.localizedString(forStatusCode: httpResponse.statusCode)
-            throw GooglePhotosAPIError.httpStatus(code: httpResponse.statusCode, message: message)
-        }
-
-        return (data, httpResponse)
     }
 
     private static func albumsURL(pageToken: String?) throws -> URL {
@@ -267,11 +289,61 @@ final class GooglePhotosAPI: @unchecked Sendable {
 
         return url
     }
+
+    private static func shouldRetry(statusCode: Int) -> Bool {
+        statusCode == 429 || statusCode == 500 || statusCode == 502 || statusCode == 503 || statusCode == 504
+    }
+
+    private static func shouldRetry(error: Error) -> Bool {
+        guard let urlError = error as? URLError else {
+            return false
+        }
+
+        switch urlError.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost, .cannotFindHost, .notConnectedToInternet:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func sleepBeforeRetry(
+        response: HTTPURLResponse?,
+        attempt: Int
+    ) async throws {
+        if let retryAfterHeader = response?.value(forHTTPHeaderField: "Retry-After") {
+            if let retryAfterSeconds = TimeInterval(retryAfterHeader) {
+                try await Task.sleep(for: .seconds(max(retryAfterSeconds, 1)))
+                return
+            }
+
+            if let retryAfterDate = HTTPDateParser.date(from: retryAfterHeader) {
+                let delay = retryAfterDate.timeIntervalSinceNow
+                if delay > 0 {
+                    try await Task.sleep(for: .seconds(delay))
+                    return
+                }
+            }
+        }
+
+        let backoff = min(pow(2.0, Double(attempt - 1)), 8)
+        try await Task.sleep(for: .seconds(backoff))
+    }
 }
 
 private struct UploadSession {
     let url: URL
     let chunkGranularity: Int
+}
+
+private enum HTTPDateParser {
+    static func date(from value: String) -> Date? {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "EEE',' dd MMM yyyy HH':'mm':'ss zzz"
+        return formatter.date(from: value)
+    }
 }
 
 struct GoogleAlbum: Codable, Sendable {
