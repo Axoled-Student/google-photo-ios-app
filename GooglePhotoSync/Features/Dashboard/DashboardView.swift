@@ -21,32 +21,29 @@ struct DashboardView: View {
     }()
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                background
+        ZStack {
+            background
 
-                GeometryReader { proxy in
-                    let compactLayout = proxy.size.width < 430
+            GeometryReader { proxy in
+                let compactLayout = proxy.size.width < 430
 
-                    ScrollView {
-                        VStack(spacing: 18) {
-                            heroCard(compact: compactLayout)
-                            actionCard
-                            metricsCard(compact: compactLayout)
-                            uploadsCard
-                            noteCard
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 20)
-                        .padding(.top, 18)
-                        .padding(.bottom, 28)
+                ScrollView {
+                    VStack(spacing: 18) {
+                        heroCard(compact: compactLayout)
+                        actionCard
+                        metricsCard(compact: compactLayout)
+                        uploadsCard
+                        noteCard
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 28)
                 }
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                headerBar
-            }
-            .toolbar(.hidden, for: .navigationBar)
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            headerBar
         }
     }
 

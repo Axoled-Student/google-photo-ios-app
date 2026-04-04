@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 import Photos
 import UniformTypeIdentifiers
@@ -16,6 +17,9 @@ enum PhotoAccessState: Equatable, Sendable {
 enum PhotoLibraryServiceError: LocalizedError {
     case assetUnavailable
     case resourceUnavailable
+    case missingImageData
+    case missingVideoAsset
+    case failedToCreateExportSession
     case failedToExport(Error)
     case failedToReadFileSize
 
@@ -25,6 +29,12 @@ enum PhotoLibraryServiceError: LocalizedError {
             return "The selected photo could not be found in the Apple Photos library."
         case .resourceUnavailable:
             return "The original resource for this item is not available."
+        case .missingImageData:
+            return "Apple Photos did not return image data for this item."
+        case .missingVideoAsset:
+            return "Apple Photos did not return a playable video asset for this item."
+        case .failedToCreateExportSession:
+            return "Apple Photos could not create a video export session for this item."
         case .failedToExport(let error):
             return "Exporting from Apple Photos failed: \(error.localizedDescription)"
         case .failedToReadFileSize:
@@ -154,17 +164,14 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             throw PhotoLibraryServiceError.assetUnavailable
         }
 
-        guard let resource = Self.primaryResource(for: asset) else {
-            throw PhotoLibraryServiceError.resourceUnavailable
-        }
+        let resource = Self.primaryResource(for: asset)
+        let originalFilename = resource?.originalFilename ?? Self.fallbackFileName(for: asset)
 
-        let url = Self.exportURL(for: resource.originalFilename)
-
-        do {
-            try await write(resource: resource, to: url)
-        } catch {
-            throw PhotoLibraryServiceError.failedToExport(error)
-        }
+        let url = try await exportAsset(
+            asset: asset,
+            kind: descriptor.kind,
+            originalFilename: originalFilename
+        )
 
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         guard let fileSize = values.fileSize else {
@@ -175,7 +182,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             descriptor: descriptor,
             fileURL: url,
             fileSize: Int64(fileSize),
-            mimeType: Self.mimeType(for: resource, kind: descriptor.kind),
+            mimeType: Self.mimeType(for: resource, kind: descriptor.kind, exportedURL: url),
             contentFingerprint: try FileFingerprint.sha256Hex(for: url)
         )
     }
@@ -186,20 +193,159 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         }
     }
 
-    private func write(resource: PHAssetResource, to url: URL) async throws {
-        let options = PHAssetResourceRequestOptions()
+    private func exportAsset(
+        asset: PHAsset,
+        kind: MediaAssetKind,
+        originalFilename: String
+    ) async throws -> URL {
+        switch kind {
+        case .photo:
+            return try await exportPhoto(asset: asset, originalFilename: originalFilename)
+        case .video:
+            return try await exportVideo(asset: asset, originalFilename: originalFilename)
+        }
+    }
+
+    private func exportPhoto(asset: PHAsset, originalFilename: String) async throws -> URL {
+        if let sourceURL = await requestFullSizeImageURL(for: asset) {
+            let filename = sourceURL.lastPathComponent.isEmpty ? originalFilename : sourceURL.lastPathComponent
+            let destinationURL = Self.exportURL(for: filename)
+            try Self.copyItem(at: sourceURL, to: destinationURL)
+            return destinationURL
+        }
+
+        let (imageData, dataUTI) = try await requestImageData(for: asset)
+        let fallbackExtension = UTType(dataUTI ?? "")?.preferredFilenameExtension ?? "jpg"
+        let destinationURL = Self.exportURL(
+            for: Self.normalizedFileName(
+                from: originalFilename,
+                fallbackExtension: fallbackExtension
+            )
+        )
+        try imageData.write(to: destinationURL, options: .atomic)
+        return destinationURL
+    }
+
+    private func exportVideo(asset: PHAsset, originalFilename: String) async throws -> URL {
+        let videoAsset = try await requestVideoAsset(for: asset)
+
+        if let urlAsset = videoAsset as? AVURLAsset, urlAsset.url.isFileURL {
+            let filename = urlAsset.url.lastPathComponent.isEmpty ? originalFilename : urlAsset.url.lastPathComponent
+            let destinationURL = Self.exportURL(for: filename)
+            try Self.copyItem(at: urlAsset.url, to: destinationURL)
+            return destinationURL
+        }
+
+        return try await exportVideoAsset(videoAsset, originalFilename: originalFilename)
+    }
+
+    private func requestFullSizeImageURL(for asset: PHAsset) async -> URL? {
+        let options = PHContentEditingInputRequestOptions()
         options.isNetworkAccessAllowed = true
 
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: options) { error in
-                if let error {
+        return await withCheckedContinuation { (continuation: CheckedContinuation<URL?, Never>) in
+            asset.requestContentEditingInput(with: options) { input, _ in
+                continuation.resume(returning: input?.fullSizeImageURL)
+            }
+        }
+    }
+
+    private func requestImageData(for asset: PHAsset) async throws -> (Data, String?) {
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.version = .current
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, String?), Error>) in
+            PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { data, dataUTI, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
                     continuation.resume(throwing: error)
                     return
                 }
 
-                continuation.resume(returning: ())
+                guard let data, !data.isEmpty else {
+                    continuation.resume(throwing: PhotoLibraryServiceError.missingImageData)
+                    return
+                }
+
+                continuation.resume(returning: (data, dataUTI))
             }
         }
+    }
+
+    private func requestVideoAsset(for asset: PHAsset) async throws -> AVAsset {
+        let options = PHVideoRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.version = .current
+
+        return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AVAsset, Error>) in
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, info in
+                if let error = info?[PHImageErrorKey] as? Error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+
+                guard let avAsset else {
+                    continuation.resume(throwing: PhotoLibraryServiceError.missingVideoAsset)
+                    return
+                }
+
+                continuation.resume(returning: avAsset)
+            }
+        }
+    }
+
+    private func exportVideoAsset(_ videoAsset: AVAsset, originalFilename: String) async throws -> URL {
+        guard let exportSession = AVAssetExportSession(
+            asset: videoAsset,
+            presetName: AVAssetExportPresetPassthrough
+        ) ?? AVAssetExportSession(
+            asset: videoAsset,
+            presetName: AVAssetExportPresetHighestQuality
+        ) else {
+            throw PhotoLibraryServiceError.failedToCreateExportSession
+        }
+
+        let outputFileType: AVFileType
+        if exportSession.supportedFileTypes.contains(.mp4) {
+            outputFileType = .mp4
+        } else if exportSession.supportedFileTypes.contains(.mov) {
+            outputFileType = .mov
+        } else if let firstSupportedType = exportSession.supportedFileTypes.first {
+            outputFileType = firstSupportedType
+        } else {
+            outputFileType = .mov
+        }
+
+        let fallbackExtension = outputFileType == .mp4 ? "mp4" : "mov"
+        let destinationURL = Self.exportURL(
+            for: Self.normalizedFileName(
+                from: originalFilename,
+                fallbackExtension: fallbackExtension
+            )
+        )
+
+        exportSession.outputURL = destinationURL
+        exportSession.outputFileType = outputFileType
+        exportSession.shouldOptimizeForNetworkUse = false
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            exportSession.exportAsynchronously {
+                switch exportSession.status {
+                case .completed:
+                    continuation.resume(returning: ())
+                case .failed:
+                    continuation.resume(throwing: exportSession.error ?? PhotoLibraryServiceError.resourceUnavailable)
+                case .cancelled:
+                    continuation.resume(throwing: CancellationError())
+                default:
+                    continuation.resume(throwing: PhotoLibraryServiceError.resourceUnavailable)
+                }
+            }
+        }
+
+        return destinationURL
     }
 
     private static func primaryResource(for asset: PHAsset) -> PHAssetResource? {
@@ -235,8 +381,32 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
         return fileExtension.isEmpty ? baseURL : baseURL.appendingPathExtension(fileExtension)
     }
 
-    private static func mimeType(for resource: PHAssetResource, kind: MediaAssetKind) -> String {
-        if let type = UTType(resource.uniformTypeIdentifier), let mimeType = type.preferredMIMEType {
+    private static func normalizedFileName(from originalFilename: String, fallbackExtension: String) -> String {
+        let pathExtension = (originalFilename as NSString).pathExtension
+        if pathExtension.isEmpty {
+            return "\(UUID().uuidString).\(fallbackExtension)"
+        }
+
+        return originalFilename
+    }
+
+    private static func copyItem(at sourceURL: URL, to destinationURL: URL) throws {
+        if FileManager.default.fileExists(atPath: destinationURL.path) {
+            try FileManager.default.removeItem(at: destinationURL)
+        }
+
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+    }
+
+    private static func mimeType(for resource: PHAssetResource?, kind: MediaAssetKind, exportedURL: URL) -> String {
+        if let resource,
+           let type = UTType(resource.uniformTypeIdentifier),
+           let mimeType = type.preferredMIMEType {
+            return mimeType
+        }
+
+        if let fileType = UTType(filenameExtension: exportedURL.pathExtension),
+           let mimeType = fileType.preferredMIMEType {
             return mimeType
         }
 

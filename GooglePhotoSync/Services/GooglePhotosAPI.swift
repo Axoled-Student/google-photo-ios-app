@@ -135,8 +135,13 @@ final class GooglePhotosAPI {
             throw GooglePhotosAPIError.invalidBatchCreateResponse
         }
 
-        if let status = result.status, status.code != 0 {
-            throw GooglePhotosAPIError.apiMessage(status.message)
+        if let status = result.status {
+            let statusCode = status.code ?? 0
+            if statusCode != 0 || status.message != nil {
+                throw GooglePhotosAPIError.apiMessage(
+                    status.message ?? "Google Photos failed to create the media item."
+                )
+            }
         }
 
         guard let mediaItem = result.mediaItem else {
@@ -217,7 +222,21 @@ final class GooglePhotosAPI {
 
     private func decode<T: Decodable>(_ request: URLRequest) async throws -> T {
         let (data, _) = try await perform(request)
-        return try JSONDecoder().decode(T.self, from: data)
+        do {
+            return try JSONDecoder().decode(T.self, from: data)
+        } catch {
+            let body = if data.isEmpty {
+                "<empty response body>"
+            } else {
+                String(data: data.prefix(2_048), encoding: .utf8) ?? "<non-UTF8 response body>"
+            }
+
+            throw GooglePhotosAPIError.decodingFailure(
+                type: String(describing: T.self),
+                message: error.localizedDescription,
+                body: body
+            )
+        }
     }
 
     private func perform(_ request: URLRequest) async throws -> (Data, HTTPURLResponse) {
@@ -270,9 +289,15 @@ private struct AlbumListResponse: Decodable {
     let albums: [GoogleAlbum]
     let nextPageToken: String?
 
-    init(albums: [GoogleAlbum] = [], nextPageToken: String? = nil) {
-        self.albums = albums
-        self.nextPageToken = nextPageToken
+    private enum CodingKeys: String, CodingKey {
+        case albums
+        case nextPageToken
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        albums = try container.decodeIfPresent([GoogleAlbum].self, forKey: .albums) ?? []
+        nextPageToken = try container.decodeIfPresent(String.self, forKey: .nextPageToken)
     }
 }
 
@@ -300,6 +325,15 @@ private struct SimpleMediaItem: Encodable {
 
 private struct BatchCreateResponse: Decodable {
     let newMediaItemResults: [BatchCreateResult]
+
+    private enum CodingKeys: String, CodingKey {
+        case newMediaItemResults
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        newMediaItemResults = try container.decodeIfPresent([BatchCreateResult].self, forKey: .newMediaItemResults) ?? []
+    }
 }
 
 private struct BatchCreateResult: Decodable {
@@ -308,8 +342,8 @@ private struct BatchCreateResult: Decodable {
 }
 
 private struct GoogleStatus: Decodable {
-    let code: Int
-    let message: String
+    let code: Int?
+    let message: String?
 }
 
 enum GooglePhotosAPIError: LocalizedError {
@@ -320,6 +354,7 @@ enum GooglePhotosAPIError: LocalizedError {
     case invalidBatchCreateResponse
     case apiMessage(String)
     case unexpectedEmptyChunk
+    case decodingFailure(type: String, message: String, body: String)
 
     var errorDescription: String? {
         switch self {
@@ -337,6 +372,8 @@ enum GooglePhotosAPIError: LocalizedError {
             return message
         case .unexpectedEmptyChunk:
             return "A prepared file produced an empty upload chunk."
+        case .decodingFailure(let type, let message, let body):
+            return "Failed to decode \(type): \(message). Response body: \(body)"
         }
     }
 }
