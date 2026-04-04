@@ -4,7 +4,6 @@ struct AppConfiguration: Sendable {
     let clientID: String
     let redirectScheme: String
     let redirectURI: String
-    let albumTitle: String
 
     static func load(bundle: Bundle = .main) -> AppConfiguration {
         let bundledClientConfiguration = BundledOAuthClientConfiguration.load(bundle: bundle)
@@ -18,8 +17,7 @@ struct AppConfiguration: Sendable {
                 ?? "",
             redirectURI: bundle.infoDictionaryString(forKey: "GoogleOAuthRedirectURI")
                 ?? bundledClientConfiguration?.redirectURI
-                ?? "",
-            albumTitle: bundle.infoDictionaryString(forKey: "GooglePhotosAlbumTitle") ?? "Camera Roll Backup"
+                ?? ""
         )
     }
 

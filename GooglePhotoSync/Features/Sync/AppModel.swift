@@ -275,8 +275,6 @@ final class AppModel {
                 updatedAt: .now
             )
 
-            let album = try await googlePhotosAPI.findOrCreateAlbum(named: configuration.albumTitle)
-
             for (index, asset) in assets.enumerated() {
                 try Task.checkCancellation()
 
@@ -293,9 +291,18 @@ final class AppModel {
                     prepared = try await photoLibraryService.prepareAsset(for: asset) { [weak self] progress, stage in
                         await MainActor.run {
                             guard let self else { return }
+                            let normalizedProgress: Double
+                            if stage == "Calculating fingerprint" {
+                                normalizedProgress = 0.75 + (progress * 0.25)
+                            } else if stage == "Photo ready" || stage == "Video ready" {
+                                normalizedProgress = 0.75
+                            } else {
+                                normalizedProgress = progress * 0.75
+                            }
+
                             self.syncMetrics.phase = .preparing
                             self.syncMetrics.currentFileName = asset.fileName
-                            self.syncMetrics.currentItemProgress = progress
+                            self.syncMetrics.currentItemProgress = normalizedProgress
                             self.syncMetrics.detailText = "\(stage) \(index + 1) of \(assets.count)"
                             self.syncMetrics.updatedAt = .now
                         }
@@ -378,7 +385,7 @@ final class AppModel {
                     let createdItem = try await googlePhotosAPI.createMediaItem(
                         uploadToken: uploadToken,
                         fileName: prepared.descriptor.fileName,
-                        albumID: album.id
+                        albumID: nil
                     )
 
                     let entry = UploadManifestEntry(
@@ -526,7 +533,7 @@ final class AppModel {
 
         if !isSignedIn {
             statusTitle = "Connect your Google account"
-            statusDetail = "The app signs in with OAuth, creates an album named \"\(configuration.albumTitle)\", and uploads media there."
+            statusDetail = "The app signs in with OAuth and uploads media directly into your Google Photos library."
             return
         }
 

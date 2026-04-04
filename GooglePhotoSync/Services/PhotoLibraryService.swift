@@ -178,11 +178,13 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             onProgress: onProgress
         )
 
-        await onProgress(1, "Calculating fingerprint")
-
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         guard let fileSize = values.fileSize else {
             throw PhotoLibraryServiceError.failedToReadFileSize
+        }
+
+        let contentFingerprint = try await FileFingerprint.sha256Hex(for: url) { progress in
+            await onProgress(progress, "Calculating fingerprint")
         }
 
         return PreparedAsset(
@@ -190,7 +192,7 @@ final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
             fileURL: url,
             fileSize: Int64(fileSize),
             mimeType: Self.mimeType(for: resource, kind: descriptor.kind, exportedURL: url),
-            contentFingerprint: try FileFingerprint.sha256Hex(for: url)
+            contentFingerprint: contentFingerprint
         )
     }
 
