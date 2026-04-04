@@ -22,11 +22,11 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
-            GeometryReader { proxy in
-                let compactLayout = proxy.size.width < 430
+            ZStack {
+                background
 
-                ZStack {
-                    background
+                GeometryReader { proxy in
+                    let compactLayout = proxy.size.width < 430
 
                     ScrollView {
                         VStack(spacing: 18) {
@@ -37,28 +37,16 @@ struct DashboardView: View {
                             noteCard
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(20)
+                        .padding(.horizontal, 20)
+                        .padding(.top, 18)
+                        .padding(.bottom, 28)
                     }
                 }
             }
-            .navigationTitle("Google Photo Sync")
-            .toolbar {
-                if model.canRetry {
-                    ToolbarItem(placement: .topBarLeading) {
-                        Button("Retry") {
-                            model.retrySync()
-                        }
-                    }
-                }
-
-                if model.canSignOut {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button("Sign Out") {
-                            model.signOut()
-                        }
-                    }
-                }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                headerBar
             }
+            .toolbar(.hidden, for: .navigationBar)
         }
     }
 
@@ -79,6 +67,65 @@ struct DashboardView: View {
                 .frame(width: 220, height: 220)
                 .blur(radius: 18)
                 .offset(x: 70, y: -50)
+        }
+    }
+
+    private var headerBar: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Google Photo Sync")
+                        .font(.system(.title2, design: .rounded).weight(.bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+
+                    Text(buildCaption)
+                        .font(.system(.caption, design: .rounded).weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer(minLength: 12)
+
+                ViewThatFits {
+                    HStack(spacing: 10) {
+                        retryButton
+                        signOutButton
+                    }
+
+                    signOutButton
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
+
+            Divider()
+                .overlay(.white.opacity(0.45))
+        }
+        .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private var retryButton: some View {
+        if model.canRetry {
+            Button("Retry") {
+                model.retrySync()
+            }
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.65), in: Capsule())
+        }
+    }
+
+    @ViewBuilder
+    private var signOutButton: some View {
+        if model.canSignOut {
+            Button("Sign Out") {
+                model.signOut()
+            }
+            .font(.system(.subheadline, design: .rounded).weight(.semibold))
+            .foregroundStyle(Color(red: 0.08, green: 0.41, blue: 0.86))
         }
     }
 
@@ -367,6 +414,12 @@ struct DashboardView: View {
 
     private var progressCaption: String {
         "\(Int(model.syncMetrics.progressFraction * 100))%"
+    }
+
+    private var buildCaption: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
+        return "v\(version) (\(build))"
     }
 
     private var statusChip: some View {
