@@ -126,6 +126,7 @@ struct SyncMetrics: Equatable, Sendable {
     var activeTransferStartedAt: Date?
     var activeTransferBaselineBytes: Int64 = 0
     var updatedAt: Date = .now
+    var activeItemCount: Int = 0
 
     var progressFraction: Double {
         if estimatedTotalBytes > 0 {
@@ -138,6 +139,10 @@ struct SyncMetrics: Equatable, Sendable {
 
     var currentItemProgressFraction: Double {
         min(max(currentItemProgress, 0), 1)
+    }
+
+    var currentItemLabel: String {
+        activeItemCount > 1 ? "Active files" : "Current file"
     }
 
     var bytesPerSecond: Double? {

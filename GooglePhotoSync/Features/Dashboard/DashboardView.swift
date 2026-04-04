@@ -217,7 +217,7 @@ struct DashboardView: View {
                 if let currentFileName = model.syncMetrics.currentFileName {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack {
-                            Text("Current file")
+                            Text(model.syncMetrics.currentItemLabel)
                                 .font(.system(.subheadline, design: .rounded).weight(.semibold))
                                 .foregroundStyle(.secondary)
                             Spacer()

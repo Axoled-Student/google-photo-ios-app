@@ -1,12 +1,12 @@
 import Foundation
 
-final class GooglePhotosAPI {
+final class GooglePhotosAPI: @unchecked Sendable {
     private let session: URLSession
-    private let accessTokenProvider: () async throws -> String
+    private let accessTokenProvider: @Sendable () async throws -> String
 
     init(
         session: URLSession = .shared,
-        accessTokenProvider: @escaping () async throws -> String
+        accessTokenProvider: @escaping @Sendable () async throws -> String
     ) {
         self.session = session
         self.accessTokenProvider = accessTokenProvider

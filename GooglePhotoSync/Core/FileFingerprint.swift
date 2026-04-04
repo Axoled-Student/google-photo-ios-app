@@ -11,7 +11,8 @@ enum FileFingerprint {
             try? handle.close()
         }
 
-        let fileSize = try fileURL.fileByteCount
+        let values = try fileURL.resourceValues(forKeys: [.fileSizeKey])
+        let fileSize = Int64(values.fileSize ?? 0)
         var processedBytes: Int64 = 0
         var hasher = SHA256()
         while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {

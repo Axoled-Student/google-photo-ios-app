@@ -50,14 +50,20 @@ struct PhotoLibraryScanSnapshot: Sendable {
 
 final class PhotoLibraryService: NSObject, PHPhotoLibraryChangeObserver {
     var onLibraryChange: (@MainActor () -> Void)?
+    private let observesPhotoLibraryChanges: Bool
 
-    override init() {
+    init(observesPhotoLibraryChanges: Bool = true) {
+        self.observesPhotoLibraryChanges = observesPhotoLibraryChanges
         super.init()
-        PHPhotoLibrary.shared().register(self)
+        if observesPhotoLibraryChanges {
+            PHPhotoLibrary.shared().register(self)
+        }
     }
 
     deinit {
-        PHPhotoLibrary.shared().unregisterChangeObserver(self)
+        if observesPhotoLibraryChanges {
+            PHPhotoLibrary.shared().unregisterChangeObserver(self)
+        }
     }
 
     func currentAuthorizationState() -> PhotoAccessState {

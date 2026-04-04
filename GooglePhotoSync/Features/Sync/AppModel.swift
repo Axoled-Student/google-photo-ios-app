@@ -90,6 +90,10 @@ final class AppModel {
         !isSyncing && syncMetrics.phase == .failed && isSignedIn && photoAccessState.isGranted
     }
 
+    private var recommendedWorkerCount: Int {
+        min(max(ProcessInfo.processInfo.activeProcessorCount / 2, 2), 3)
+    }
+
     func bootstrap() async {
         guard !isBootstrapped else { return }
         isBootstrapped = true
@@ -245,7 +249,6 @@ final class AppModel {
             let uploadedIdentifiers = try await manifestStore.uploadedIdentifiers()
             let librarySnapshot = await scanLibrarySnapshot(excluding: uploadedIdentifiers)
             let assets = librarySnapshot.descriptors
-            let photoLibraryService = ensurePhotoLibraryService()
 
             totalLibraryCount = librarySnapshot.totalCount
             uploadedCount = uploadedIdentifiers.count
@@ -270,167 +273,14 @@ final class AppModel {
                     partialResult += asset.estimatedByteCount
                 },
                 currentFileName: nil,
-                detailText: "Preparing \(assets.count) items for upload.",
+                detailText: "Preparing \(assets.count) items with \(min(recommendedWorkerCount, assets.count)) workers.",
                 activeTransferStartedAt: nil,
                 updatedAt: .now
             )
-
-            for (index, asset) in assets.enumerated() {
-                try Task.checkCancellation()
-
-                syncMetrics.phase = .preparing
-                syncMetrics.currentFileName = asset.fileName
-                syncMetrics.currentItemProgress = 0
-                syncMetrics.detailText = "Preparing \(index + 1) of \(assets.count)"
-                syncMetrics.activeTransferStartedAt = nil
-                syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
-                syncMetrics.updatedAt = .now
-
-                let prepared: PreparedAsset
-                do {
-                    prepared = try await photoLibraryService.prepareAsset(for: asset) { [weak self] progress, stage in
-                        await MainActor.run {
-                            guard let self else { return }
-                            let normalizedProgress: Double
-                            if stage == "Calculating fingerprint" {
-                                normalizedProgress = 0.75 + (progress * 0.25)
-                            } else if stage == "Photo ready" || stage == "Video ready" {
-                                normalizedProgress = 0.75
-                            } else {
-                                normalizedProgress = progress * 0.75
-                            }
-
-                            self.syncMetrics.phase = .preparing
-                            self.syncMetrics.currentFileName = asset.fileName
-                            self.syncMetrics.currentItemProgress = normalizedProgress
-                            self.syncMetrics.detailText = "\(stage) \(index + 1) of \(assets.count)"
-                            self.syncMetrics.updatedAt = .now
-                        }
-                    }
-                } catch {
-                    syncMetrics.completedItems = index + 1
-                    syncMetrics.estimatedTotalBytes = max(
-                        syncMetrics.uploadedBytes,
-                        syncMetrics.estimatedTotalBytes - asset.estimatedByteCount
-                    )
-                    syncMetrics.currentFileName = asset.fileName
-                    syncMetrics.currentItemProgress = 0
-                    syncMetrics.detailText = "Skipped unavailable item \(index + 1) of \(assets.count)"
-                    syncMetrics.updatedAt = .now
-                    pendingCount = max(assets.count - (index + 1), 0)
-                    continue
-                }
-
-                do {
-                    defer {
-                        try? FileManager.default.removeItem(at: prepared.fileURL)
-                    }
-
-                    if let existingEntry = try await manifestStore.entry(
-                        matchingContentFingerprint: prepared.contentFingerprint,
-                        fileName: asset.fileName,
-                        fileSize: prepared.fileSize
-                    ) {
-                        try await manifestStore.linkDuplicateAsset(
-                            localIdentifier: asset.localIdentifier,
-                            fileName: asset.fileName,
-                            fileSize: prepared.fileSize,
-                            contentFingerprint: prepared.contentFingerprint,
-                            originalEntry: existingEntry
-                        )
-
-                        syncMetrics.completedItems = index + 1
-                        syncMetrics.estimatedTotalBytes = max(
-                            syncMetrics.uploadedBytes,
-                            syncMetrics.estimatedTotalBytes - prepared.fileSize
-                        )
-                        syncMetrics.currentFileName = asset.fileName
-                        syncMetrics.currentItemProgress = 1
-                        syncMetrics.detailText = "Skipped duplicate \(index + 1) of \(assets.count)"
-                        syncMetrics.updatedAt = .now
-
-                        uploadedCount += 1
-                        pendingCount = max(assets.count - (index + 1), 0)
-                        continue
-                    }
-
-                    syncMetrics.estimatedTotalBytes = max(
-                        syncMetrics.uploadedBytes + prepared.fileSize,
-                        syncMetrics.estimatedTotalBytes + (prepared.fileSize - asset.estimatedByteCount)
-                    )
-
-                    let baseUploadedBytes = syncMetrics.uploadedBytes
-                    syncMetrics.activeTransferStartedAt = .now
-                    syncMetrics.activeTransferBaselineBytes = baseUploadedBytes
-                    syncMetrics.currentItemProgress = 0
-
-                    let uploadToken = try await googlePhotosAPI.uploadFile(
-                        at: prepared.fileURL,
-                        mimeType: prepared.mimeType
-                    ) { [weak self] bytesSent in
-                        await MainActor.run {
-                            guard let self else { return }
-                            self.syncMetrics.phase = .uploading
-                            self.syncMetrics.currentFileName = asset.fileName
-                            self.syncMetrics.uploadedBytes = baseUploadedBytes + bytesSent
-                            self.syncMetrics.currentItemProgress = min(
-                                max(Double(bytesSent) / Double(max(prepared.fileSize, 1)), 0),
-                                1
-                            )
-                            self.syncMetrics.detailText = "Uploading \(index + 1) of \(assets.count)"
-                            self.syncMetrics.updatedAt = .now
-                        }
-                    }
-
-                    let createdItem = try await googlePhotosAPI.createMediaItem(
-                        uploadToken: uploadToken,
-                        fileName: prepared.descriptor.fileName,
-                        albumID: nil
-                    )
-
-                    let entry = UploadManifestEntry(
-                        localIdentifier: asset.localIdentifier,
-                        fileName: asset.fileName,
-                        fileSize: prepared.fileSize,
-                        mediaItemID: createdItem.id,
-                        productURL: createdItem.productUrl.flatMap(URL.init(string:)),
-                        uploadedAt: .now,
-                        contentFingerprint: prepared.contentFingerprint
-                    )
-
-                    try await manifestStore.markUploaded(entry)
-
-                    syncMetrics.completedItems = index + 1
-                    syncMetrics.uploadedBytes = baseUploadedBytes + prepared.fileSize
-                    syncMetrics.currentItemProgress = 1
-                    syncMetrics.detailText = "Uploaded \(index + 1) of \(assets.count)"
-                    syncMetrics.activeTransferStartedAt = nil
-                    syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
-                    syncMetrics.updatedAt = .now
-
-                    uploadedCount += 1
-                    pendingCount = max(assets.count - (index + 1), 0)
-                    lastSyncDate = entry.uploadedAt
-                    recentUploads.insert(
-                        RecentUpload(
-                            fileName: entry.fileName,
-                            uploadedAt: entry.uploadedAt,
-                            mediaItemID: entry.mediaItemID,
-                            productURL: entry.productURL
-                        ),
-                        at: 0
-                    )
-                    recentUploads = Array(recentUploads.prefix(8))
-                }
-            }
-
-            syncMetrics.phase = .syncingComplete
-            syncMetrics.activeTransferStartedAt = nil
-            syncMetrics.activeTransferBaselineBytes = syncMetrics.uploadedBytes
-            syncMetrics.currentFileName = nil
-            syncMetrics.currentItemProgress = 0
-            syncMetrics.detailText = "Sync complete. New photos will queue automatically."
-            syncMetrics.updatedAt = .now
+            try await processAssetsConcurrently(
+                assets,
+                initialUploadedCount: uploadedIdentifiers.count
+            )
             await refreshLocalState()
         } catch is CancellationError {
             syncMetrics = SyncMetrics()
@@ -449,6 +299,84 @@ final class AppModel {
         }
 
         _ = reason
+    }
+
+    private func processAssetsConcurrently(
+        _ assets: [LibraryAssetDescriptor],
+        initialUploadedCount: Int
+    ) async throws {
+        let tracker = SyncProgressTracker(
+            totalItems: assets.count,
+            estimatedTotalBytes: assets.reduce(into: Int64.zero) { partialResult, asset in
+                partialResult += asset.estimatedByteCount
+            },
+            initialDetail: "Preparing \(assets.count) items with \(min(recommendedWorkerCount, assets.count)) workers."
+        ) { [weak self] snapshot in
+            self?.applySyncProgressSnapshot(snapshot, initialUploadedCount: initialUploadedCount)
+        }
+        let deduper = FingerprintUploadCoordinator(manifestStore: manifestStore)
+        let manifestStore = self.manifestStore
+        let googlePhotosAPI = self.googlePhotosAPI
+        let totalCount = assets.count
+        let workerCount = min(recommendedWorkerCount, totalCount)
+
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            var nextIndex = 0
+
+            func enqueueTask(for index: Int) {
+                let asset = assets[index]
+                group.addTask {
+                    try await SyncAssetProcessor.run(
+                        descriptor: asset,
+                        queueIndex: index,
+                        totalCount: totalCount,
+                        tracker: tracker,
+                        deduper: deduper,
+                        manifestStore: manifestStore,
+                        googlePhotosAPI: googlePhotosAPI
+                    ) { [weak self] entry in
+                        self?.recordUploadedEntry(entry)
+                    }
+                }
+            }
+
+            while nextIndex < workerCount {
+                enqueueTask(for: nextIndex)
+                nextIndex += 1
+            }
+
+            while try await group.next() != nil {
+                if nextIndex < totalCount {
+                    enqueueTask(for: nextIndex)
+                    nextIndex += 1
+                }
+            }
+        }
+
+        await tracker.complete(detail: "Sync complete. New photos will queue automatically.")
+    }
+
+    private func applySyncProgressSnapshot(
+        _ snapshot: SyncProgressSnapshot,
+        initialUploadedCount: Int
+    ) {
+        syncMetrics = snapshot.metrics
+        uploadedCount = initialUploadedCount + snapshot.uploadedLikeCompletedCount
+        pendingCount = max(snapshot.metrics.totalItems - snapshot.processedItemsCount, 0)
+    }
+
+    private func recordUploadedEntry(_ entry: UploadManifestEntry) {
+        lastSyncDate = entry.uploadedAt
+        recentUploads.insert(
+            RecentUpload(
+                fileName: entry.fileName,
+                uploadedAt: entry.uploadedAt,
+                mediaItemID: entry.mediaItemID,
+                productURL: entry.productURL
+            ),
+            at: 0
+        )
+        recentUploads = Array(recentUploads.prefix(8))
     }
 
     private func refreshLocalState() async {
