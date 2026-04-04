@@ -123,9 +123,6 @@ jobs:
           APP_PATH="build-output/Build/Products/Release-iphoneos/GooglePhotoSync.app"
           INFO_PLIST="$APP_PATH/Info.plist"
 
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.1" "$INFO_PLIST"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 2" "$INFO_PLIST"
-
           if /usr/libexec/PlistBuddy -c "Print :UILaunchStoryboardName" "$INFO_PLIST" >/dev/null 2>&1; then
             /usr/libexec/PlistBuddy -c "Set :UILaunchStoryboardName LaunchScreen" "$INFO_PLIST"
           else
@@ -150,8 +147,8 @@ jobs:
           echo "CFBundleVersion=$BUILD"
 
           [[ "$LAUNCH_NAME" == "LaunchScreen" ]]
-          [[ "$VERSION" == "1.0.1" ]]
-          [[ "$BUILD" == "2" ]]
+          [[ "$VERSION" == "1.0.2" ]]
+          [[ "$BUILD" == "3" ]]
           [[ -n "$CLIENT_ID" ]]
 
       - name: Package unsigned IPA
