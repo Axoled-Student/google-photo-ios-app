@@ -315,7 +315,10 @@ final class AppModel {
             self?.applySyncProgressSnapshot(snapshot, initialUploadedCount: initialUploadedCount)
         }
         let deduper = FingerprintUploadCoordinator(manifestStore: manifestStore)
-        let writeGate = GooglePhotosWriteGate(maxConcurrentWrites: 2)
+        let writeGate = GooglePhotosWriteGate(
+            maxConcurrentWrites: min(recommendedWorkerCount, 3),
+            initialConcurrentWrites: min(2, recommendedWorkerCount)
+        )
         let manifestStore = self.manifestStore
         let googlePhotosAPI = self.googlePhotosAPI
         let totalCount = assets.count

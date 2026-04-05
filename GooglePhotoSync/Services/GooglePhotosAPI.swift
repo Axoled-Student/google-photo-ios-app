@@ -52,7 +52,7 @@ final class GooglePhotosAPI: @unchecked Sendable {
             try? handle.close()
         }
 
-        let preferredChunkSize = max(uploadSession.chunkGranularity, 4 * 1024 * 1024)
+        let preferredChunkSize = max(uploadSession.chunkGranularity, 8 * 1024 * 1024)
         let normalizedChunkSize = preferredChunkSize - (preferredChunkSize % uploadSession.chunkGranularity)
         let chunkSize = max(normalizedChunkSize, uploadSession.chunkGranularity)
 
@@ -446,6 +446,22 @@ enum GooglePhotosAPIError: LocalizedError {
             return "A prepared file produced an empty upload chunk."
         case .decodingFailure(let type, let message, let body):
             return "Failed to decode \(type): \(message). Response body: \(body)"
+        }
+    }
+
+    static func isQuotaRateLimit(_ error: Error) -> Bool {
+        guard let googleError = error as? GooglePhotosAPIError else {
+            return false
+        }
+
+        switch googleError {
+        case .httpStatus(let code, let message):
+            return code == 429 || message.localizedCaseInsensitiveContains("RESOURCE_EXHAUSTED")
+        case .apiMessage(let message):
+            return message.localizedCaseInsensitiveContains("Quota exceeded") ||
+                message.localizedCaseInsensitiveContains("RESOURCE_EXHAUSTED")
+        default:
+            return false
         }
     }
 }

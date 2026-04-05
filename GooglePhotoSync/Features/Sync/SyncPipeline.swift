@@ -243,16 +243,24 @@ enum FingerprintUploadResolution: Sendable {
 }
 
 actor GooglePhotosWriteGate {
-    private var availablePermits: Int
+    private let maxConcurrentWrites: Int
+    private var targetConcurrentWrites: Int
+    private var activeWrites = 0
+    private var consecutiveSuccesses = 0
+    private var cooldownEndsAt: Date?
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    init(maxConcurrentWrites: Int) {
-        self.availablePermits = max(maxConcurrentWrites, 1)
+    init(maxConcurrentWrites: Int, initialConcurrentWrites: Int = 2) {
+        let normalizedMax = max(maxConcurrentWrites, 1)
+        self.maxConcurrentWrites = normalizedMax
+        self.targetConcurrentWrites = min(max(initialConcurrentWrites, 1), normalizedMax)
     }
 
     func acquire() async {
-        if availablePermits > 0 {
-            availablePermits -= 1
+        refreshCooldownWindowIfNeeded()
+
+        if activeWrites < effectiveConcurrentWrites {
+            activeWrites += 1
             return
         }
 
@@ -262,13 +270,51 @@ actor GooglePhotosWriteGate {
     }
 
     func release() {
-        if let waiter = waiters.first {
-            waiters.removeFirst()
-            waiter.resume()
-            return
+        activeWrites = max(activeWrites - 1, 0)
+        resumeWaitersIfPossible()
+    }
+
+    func registerSuccessfulWrite() {
+        refreshCooldownWindowIfNeeded()
+
+        guard cooldownEndsAt == nil else { return }
+
+        consecutiveSuccesses += 1
+        if targetConcurrentWrites < maxConcurrentWrites, consecutiveSuccesses >= 8 {
+            targetConcurrentWrites += 1
+            consecutiveSuccesses = 0
+            resumeWaitersIfPossible()
+        }
+    }
+
+    func registerQuotaError() {
+        targetConcurrentWrites = 1
+        consecutiveSuccesses = 0
+        cooldownEndsAt = .now.addingTimeInterval(90)
+    }
+
+    private var effectiveConcurrentWrites: Int {
+        if let cooldownEndsAt, cooldownEndsAt > .now {
+            return 1
         }
 
-        availablePermits += 1
+        return targetConcurrentWrites
+    }
+
+    private func refreshCooldownWindowIfNeeded() {
+        if let cooldownEndsAt, cooldownEndsAt <= .now {
+            self.cooldownEndsAt = nil
+        }
+    }
+
+    private func resumeWaitersIfPossible() {
+        refreshCooldownWindowIfNeeded()
+
+        while activeWrites < effectiveConcurrentWrites, let waiter = waiters.first {
+            waiters.removeFirst()
+            activeWrites += 1
+            waiter.resume()
+        }
     }
 }
 
@@ -389,35 +435,43 @@ enum SyncAssetProcessor {
                 }
             }
 
-            let uploadToken = try await googlePhotosAPI.uploadFile(
-                at: preparedAsset.fileURL,
-                mimeType: preparedAsset.mimeType
-            ) { bytesSent in
-                await tracker.updateUploading(
-                    assetID: descriptor.localIdentifier,
-                    bytesSent: bytesSent,
-                    detail: "Uploading \(detailPrefix)"
+            do {
+                let uploadToken = try await googlePhotosAPI.uploadFile(
+                    at: preparedAsset.fileURL,
+                    mimeType: preparedAsset.mimeType
+                ) { bytesSent in
+                    await tracker.updateUploading(
+                        assetID: descriptor.localIdentifier,
+                        bytesSent: bytesSent,
+                        detail: "Uploading \(detailPrefix)"
+                    )
+                }
+
+                let createdItem = try await googlePhotosAPI.createMediaItem(
+                    uploadToken: uploadToken,
+                    fileName: preparedAsset.descriptor.fileName,
+                    albumID: nil
                 )
+
+                let entry = UploadManifestEntry(
+                    localIdentifier: descriptor.localIdentifier,
+                    fileName: descriptor.fileName,
+                    fileSize: preparedAsset.fileSize,
+                    mediaItemID: createdItem.id,
+                    productURL: createdItem.productUrl.flatMap(URL.init(string:)),
+                    uploadedAt: .now,
+                    contentFingerprint: preparedAsset.contentFingerprint
+                )
+
+                try await manifestStore.markUploaded(entry)
+                await writeGate.registerSuccessfulWrite()
+                return entry
+            } catch {
+                if GooglePhotosAPIError.isQuotaRateLimit(error) {
+                    await writeGate.registerQuotaError()
+                }
+                throw error
             }
-
-            let createdItem = try await googlePhotosAPI.createMediaItem(
-                uploadToken: uploadToken,
-                fileName: preparedAsset.descriptor.fileName,
-                albumID: nil
-            )
-
-            let entry = UploadManifestEntry(
-                localIdentifier: descriptor.localIdentifier,
-                fileName: descriptor.fileName,
-                fileSize: preparedAsset.fileSize,
-                mediaItemID: createdItem.id,
-                productURL: createdItem.productUrl.flatMap(URL.init(string:)),
-                uploadedAt: .now,
-                contentFingerprint: preparedAsset.contentFingerprint
-            )
-
-            try await manifestStore.markUploaded(entry)
-            return entry
         }
 
         switch resolution {
